@@ -149,7 +149,10 @@ def publish_container(ig_user: str, token: str, creation_id: str) -> PublishResu
     return PublishResult(media_id=media_id, permalink=info.get("permalink", ""), video_url="")
 
 
-def publish_package(package_dir: Path, confirm: bool) -> dict:
+def publish_package(package_dir: Path, confirm: bool, publish_at: "datetime | None" = None) -> dict:
+    """Host, create the container, then publish. With `publish_at` (an aware
+    datetime), the container is prepared early and the final publish call
+    waits until that moment, so the post lands on the minute."""
     meta = json.loads((package_dir / "package.json").read_text(encoding="utf-8"))
     video = package_dir / meta["video"]
     cover = package_dir / meta["cover"] if meta.get("cover") else None
@@ -170,6 +173,12 @@ def publish_package(package_dir: Path, confirm: bool) -> dict:
     video_url, cover_url = host_on_github(video, cover, meta["id"], dry_run=False)
     creation = create_container(ig_user, token, video_url, caption, cover_url)
     wait_container(creation, token)
+    if publish_at is not None:
+        from datetime import datetime, timezone
+
+        delay = (publish_at - datetime.now(timezone.utc)).total_seconds()
+        if delay > 0:
+            time.sleep(min(delay, 3600))
     result = publish_container(ig_user, token, creation)
     meta.update({"status": "published", "post_url": result.permalink, "media_id": result.media_id, "video_url": video_url, "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     (package_dir / "package.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
@@ -205,13 +214,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--package", help="output/approved/<date>/<id>")
     ap.add_argument("--confirm", action="store_true", help="actually host and publish (default is a dry run)")
     ap.add_argument("--check", action="store_true", help="read-only: verify IG_ACCESS_TOKEN against the API")
+    ap.add_argument("--publish-at", default=None, help="HH:MM in IST today: prepare now, publish on that minute")
     args = ap.parse_args(argv)
     if args.check:
         print(json.dumps(check_credentials(), indent=1))
         return 0
     if not args.package:
         ap.error("--package is required unless --check is given")
-    result = publish_package(Path(args.package), args.confirm)
+    publish_at = None
+    if args.publish_at:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        h, m = (int(x) for x in args.publish_at.split(":"))
+        publish_at = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    result = publish_package(Path(args.package), args.confirm, publish_at=publish_at)
     print(json.dumps(result, indent=1))
     return 0
 

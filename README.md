@@ -59,6 +59,10 @@ No paid AI, video, image, TTS or stock APIs. No cloud GPU rentals. No paid hosti
 
 Every reel has an animated host: a prebuilt anime character, the VRoid Project's CC0 `HairSample_Male` avatar (`video-engine/public/models/host.vrm`, licence in `assets/models/LICENSE.txt`), driven by `video-engine/src/layers/VrmHost.tsx` through the model's own rig (VRM expressions for lip-sync and blinks, humanoid bones for head sway, breathing and a relaxed arm pose; any VRM file drops in via `presenter.model`). Alternatives kept as `presenter.look`: `image` (your own picture animated in layers by `ImageHost.tsx`) and the vector looks in `Presenter.tsx`, a male English voice (Sarvam Bulbul when `VOICE_PROVIDER=sarvam` in `.env`, else Kokoro `am_fenrir`; see `.env.example`), an anxious-funny hook inside the first 5 seconds (`.claude/skills/generate-script/hooks.md`), and no link anywhere: the last scene asks viewers to comment `LETS GO` and `services/publishing/dm_bot.py` sends the link by DM. `python -m services.common.rules data/storyboards/<id>.json` enforces all of it before the voiceover.
 
+## Daily automation
+
+Two reels a day, unattended: `services/scheduler/daily.py` produces each reel ahead of time (research, LLM script via `services/story/generate.py`, voiceover, render, QA, package) and posts it on the minute at 15:30 and 20:40 IST with an SEO caption that carries the posting date, then answers LETS GO comments. `install-tasks` registers the Windows scheduled tasks; `AUTOPUBLISH` in `.env` is the kill switch. Details in `docs/AUTOMATION.md`.
+
 ## Publishing
 
 REELFORGE prepares a publication package (MP4, cover, caption, hashtags, checklist) for manual upload. It never posts to Instagram on its own. After you approve a post, `services/publishing/instagram.py` publishes it through the official Graph API and `dm_bot.py` answers the keyword comments.

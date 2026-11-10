@@ -2,7 +2,7 @@
  "id": "openai-to-acquire-pierre-computer-company-inc",
  "name": "OpenAI to acquire Pierre Computer Company, Inc.",
  "category": "news",
- "description": "OpenAI will acquire Pierre Computer Company, expanding Codex\u2019s tools for building, understanding, and reviewing code.",
+ "description": "OpenAI will acquire Pierre Computer Company, expanding Codex’s tools for building, understanding, and reviewing code.",
  "sources": [
   {
    "url": "https://openai.com/index/openai-to-acquire-pierre",
@@ -23,7 +23,8 @@
   "shareability": 41.2
  },
  "score_total": 73.0,
- "status": "candidate",
- "used_at": null,
- "discovered_at": "2026-11-08T10:24:35.517892+00:00"
+ "status": "used",
+ "used_at": "2026-11-11T01:12:02.571704+05:30",
+ "discovered_at": "2026-11-08T10:24:35.517892+00:00",
+ "reel_id": "20261111-afternoon-openai-to-acquire-pierre-computer-compan"
 }

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 import time
@@ -30,7 +31,7 @@ from services.common.rules import check_storyboard
 from services.common.schema import Caption, PresenterSpec, ReelSpec, Storyboard, TimedScene
 from services.common.env import load_dotenv
 from services.tts.expressions import expression_track
-from services.tts.provider import TTSResult, WordTiming, get_provider, pick_provider_name, realign_words, text_hash
+from services.tts.provider import ProviderExhausted, TTSResult, WordTiming, get_provider, pick_provider_name, realign_words, text_hash
 
 log = logging.getLogger("reelforge.tts.synthesize")
 OUT_SR = 48000
@@ -109,6 +110,21 @@ def _store(cache_dir: Path, key: str, r: TTSResult) -> None:
 
 
 def synthesize_storyboard(sb: Storyboard, device: str = "auto", force: bool = False, provider_name: str | None = None, allow_rule_violations: bool = False) -> ReelSpec:
+    """Synthesize with the chosen provider; if a paid provider is exhausted
+    (credits, auth, rate limit, down), start over with the free local one
+    (TTS_FALLBACK, default kokoro) so the whole reel keeps one voice."""
+    try:
+        return _synthesize(sb, device, force, provider_name, allow_rule_violations)
+    except ProviderExhausted as exc:
+        fallback = (os.environ.get("TTS_FALLBACK") or "kokoro").strip().lower()
+        chosen = pick_provider_name(provider_name, sb.voice.provider)
+        if chosen == fallback:
+            raise
+        log.warning("voice provider %s unavailable (%s); falling back to %s", chosen, str(exc)[:160], fallback)
+        return _synthesize(sb, device, force, fallback, allow_rule_violations)
+
+
+def _synthesize(sb: Storyboard, device: str, force: bool, provider_name: str | None, allow_rule_violations: bool) -> ReelSpec:
     paths.ensure_dirs()
     problems = check_storyboard(sb)
     if problems:

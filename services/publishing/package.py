@@ -33,7 +33,9 @@ def build_package(spec_path: Path, video: Path, cover: Path | None, qa: Path | N
         shutil.copy(cover, out_dir / "cover.png")
     caption = spec.get("caption", "").strip()
     hashtags = spec.get("hashtags", [])
-    (out_dir / "caption.txt").write_text(caption + "\n\n" + " ".join(hashtags) + "\n", encoding="utf-8")
+    tags_line = " ".join(hashtags)
+    full_caption = caption if (tags_line and tags_line in caption) else caption + "\n\n" + tags_line
+    (out_dir / "caption.txt").write_text(full_caption.strip() + "\n", encoding="utf-8")
     (out_dir / "hashtags.txt").write_text("\n".join(hashtags) + "\n", encoding="utf-8")
     (out_dir / "sources.txt").write_text("\n".join(spec.get("sources", [])) + "\n", encoding="utf-8")
     qa_summary = "not run"

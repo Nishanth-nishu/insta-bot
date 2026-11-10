@@ -1,0 +1,164 @@
+{
+  "id": "20261111-afternoon-openai-to-acquire-pierre-computer-compan",
+  "title": "AI coding agent just got massive",
+  "style": "cinematic",
+  "voice": {
+    "provider": "kokoro",
+    "voice": "am_fenrir",
+    "speed": 1.05
+  },
+  "presenter": {
+    "enabled": true,
+    "name": "host",
+    "mood": "hype",
+    "look": "vrm",
+    "model": "models/host.vrm",
+    "image": "images/host.png"
+  },
+  "music": {
+    "file": "music/ambient_bed.wav",
+    "volume": 0.2,
+    "bpm": 84.0
+  },
+  "caption": "Coders, OpenAI just bought the AI coding agent company.\n\nOpenAI is acquiring Pierre Computer Company to expand its AI coding agent. Codex will soon handle building, understanding, and reviewing code.\n\n11 Nov 2026 update. Save this for later.\n\nWant the link? Comment LETS GO and I'll DM it to you.\n\n#codingagent #codex #openai #ai #artificialintelligence #technews",
+  "hashtags": [
+    "#codingagent",
+    "#codex",
+    "#openai",
+    "#ai",
+    "#artificialintelligence",
+    "#technews"
+  ],
+  "sources": [
+    "https://openai.com/index/openai-to-acquire-pierre"
+  ],
+  "dmKeyword": "LETS GO",
+  "dmLink": "https://openai.com/index/openai-to-acquire-pierre",
+  "scenes": [
+    {
+      "id": "hook",
+      "kind": "hook",
+      "narration": "Coders, OpenAI just bought the AI coding agent company. Codex is about to get huge.",
+      "title": "OpenAI just bought Pierre Computer Company",
+      "lines": [],
+      "highlight": [
+        "bought"
+      ],
+      "data": {
+        "kicker": "AI NEWS / 11 NOV 2026"
+      },
+      "transition": "current",
+      "leadInMs": 150,
+      "padAfterMs": 200,
+      "minDurationMs": 2500
+    },
+    {
+      "id": "concept",
+      "kind": "concept",
+      "narration": "OpenAI is acquiring Pierre Computer Company right now. Codex is getting a massive upgrade.",
+      "title": "Codex expands its toolkit for coders",
+      "lines": [
+        "Build your code fast",
+        "Understand any module",
+        "Review each pull request",
+        "Ship with one click"
+      ],
+      "highlight": [
+        "Codex"
+      ],
+      "data": {
+        "kicker": "EXPANDING CODEX"
+      },
+      "transition": "current",
+      "leadInMs": 150,
+      "padAfterMs": 260,
+      "minDurationMs": 2500
+    },
+    {
+      "id": "workflow",
+      "kind": "workflow",
+      "narration": "Build your feature from scratch. Understand a legacy module in seconds. Review the pull request batch. Then ship with confidence.",
+      "title": "One agent with three code skills",
+      "lines": [],
+      "highlight": [
+        "agent"
+      ],
+      "data": {
+        "stages": [
+          "Build",
+          "Understand",
+          "Review",
+          "Ship"
+        ],
+        "goal": "One agent"
+      },
+      "transition": "zoomIn",
+      "leadInMs": 150,
+      "padAfterMs": 260,
+      "minDurationMs": 2500
+    },
+    {
+      "id": "concept",
+      "kind": "concept",
+      "narration": "The agent now writes, reads, and checks code by itself. You focus on product design and strategy.",
+      "title": "The agent handles more steps now",
+      "lines": [
+        "Write code without prompts",
+        "Read any codebase fast",
+        "Fix bugs as they appear",
+        "Let humans design"
+      ],
+      "highlight": [
+        "agent"
+      ],
+      "data": {
+        "kicker": "MORE STEPS"
+      },
+      "transition": "current",
+      "leadInMs": 150,
+      "padAfterMs": 260,
+      "minDurationMs": 2500
+    },
+    {
+      "id": "concept",
+      "kind": "concept",
+      "narration": "Pierre Computer builds cutting edge tools. Now OpenAI owns them. Expect faster releases and smarter features.",
+      "title": "Pierre Computer powers the new Codex",
+      "lines": [
+        "More power to Codex",
+        "Smarter autocomplete",
+        "Better error fixes",
+        "Faster builds overall"
+      ],
+      "highlight": [
+        "Pierre"
+      ],
+      "data": {
+        "kicker": "PIERRE POWER"
+      },
+      "transition": "up",
+      "leadInMs": 150,
+      "padAfterMs": 260,
+      "minDurationMs": 2500
+    },
+    {
+      "id": "payoff",
+      "kind": "payoff",
+      "narration": "Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.",
+      "title": "Comment LETS GO for the link",
+      "lines": [],
+      "highlight": [
+        "LETS",
+        "GO"
+      ],
+      "data": {
+        "kicker": "THE TAKEAWAY"
+      },
+      "transition": "current",
+      "cta": "Comment LETS GO, the link lands in your DMs",
+      "leadInMs": 150,
+      "padAfterMs": 900,
+      "minDurationMs": 2500
+    }
+  ]
+}

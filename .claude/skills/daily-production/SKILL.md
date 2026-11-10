@@ -17,6 +17,9 @@ A user request, or the Windows Task Scheduler entry (Phase 8) firing `services/s
 ## Outputs
 - `output/approved/<date>/<id>/` with MP4, cover, caption.txt, hashtags.txt, checklist.md, plus `output/reports/<date>.production.md`.
 
+## Unattended mode (since 2026-11-11)
+`services/scheduler/daily.py` runs the whole chain without an agent in the loop: `produce --slot afternoon|night` (research, pick topic, LLM script+storyboard via `services/story/generate.py`, voiceover, 1080p render, cover, QA, package, queue) and `publish --slot ...` (host, container, wait for the slot minute, publish, DM bot). Windows tasks: `install-tasks`. Two slots a day: 15:30 and 20:40 IST. See docs/AUTOMATION.md. The steps below describe the same chain when an agent drives it by hand.
+
 ## Workflow
 1. `research-topic` -> pick three with different categories and no overlap with the last 30 days.
 2. For each: `generate-script` -> `create-storyboard` -> `generate-voiceover` -> `render-reel` (draft) -> `review-reel` -> fix -> `render-reel` (standard or cinematic) -> `review-reel` -> export package.
@@ -28,7 +31,7 @@ A user request, or the Windows Task Scheduler entry (Phase 8) firing `services/s
 Three distinct topics, each with a passed QA report, each package complete. Fewer than three is acceptable when quality would otherwise drop; say so in the report.
 
 ## Error handling
-- Never publish; packages wait for manual approval. After the user approves and a reel is posted through `services.publishing.instagram`, run the DM bot so `LETS GO` comments get the link: `python -m services.publishing.dm_bot --send --watch` (dry run first; see docs/PUBLISHING.md "Comment-to-DM link gate").
+- By hand: never publish without approval. In unattended mode the scheduled `publish` step posts on its own when `AUTOPUBLISH=true` and QA passed; `AUTOPUBLISH=false` pauses it. After a post, run the DM bot so `LETS GO` comments get the link: `python -m services.publishing.dm_bot --send --watch` (dry run first; see docs/PUBLISHING.md "Comment-to-DM link gate").
 - Every reel uses the house format: animated male host (long hair, black hoodie), male English voice `am_fenrir`, anxious-funny 5 s hook, no link on screen or in the caption, keyword CTA. `services.common.rules` must pass before voiceover.
 - Never reuse a topic slug used in the last 30 days.
 

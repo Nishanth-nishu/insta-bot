@@ -265,6 +265,13 @@ class PiperProvider(TTSProvider):
 KOKORO_VOICE_RE = re.compile(r"^[a-z]{2}_[a-z]+$")
 
 
+class ProviderExhausted(RuntimeError):
+    """The paid provider cannot serve (credits, auth, rate limit, down); fall back to a free one."""
+
+
+_TTS_EXHAUSTED = re.compile(r"HTTP (401|402|403|429|5\d\d)|quota|credit|insufficient|exhausted|rate.?limit", re.I)
+
+
 class SarvamProvider(TTSProvider):
     """Sarvam AI Bulbul text-to-speech over plain HTTPS (no SDK).
 
@@ -326,7 +333,10 @@ class SarvamProvider(TTSProvider):
         post = self._post or (lambda **kw: httpx.post(**kw))
         last_err = ""
         for attempt in range(3):
-            resp = post(url=self.URL, json=body, headers=headers, timeout=60)
+            try:
+                resp = post(url=self.URL, json=body, headers=headers, timeout=60)
+            except Exception as exc:  # network down: let the caller fall back
+                raise ProviderExhausted(f"Sarvam TTS unreachable: {exc}") from exc
             if resp.status_code == 200:
                 data = resp.json()
                 raw = b"".join(base64.b64decode(a) for a in data.get("audios", []))
@@ -340,6 +350,8 @@ class SarvamProvider(TTSProvider):
                 time.sleep(1.5 * (attempt + 1))
                 continue
             break
+        if _TTS_EXHAUSTED.search(last_err):
+            raise ProviderExhausted(f"Sarvam TTS failed ({last_err})")
         raise RuntimeError(f"Sarvam TTS failed ({last_err})")
 
     def synthesize(self, text: str, voice: str = "", speed: float = 1.0, caption_text: str | None = None) -> TTSResult:

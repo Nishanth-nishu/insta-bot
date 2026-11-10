@@ -75,3 +75,4 @@ video-engine/public/models/*
 !assets/models/
 assets/models/*
 !assets/models/LICENSE.txt
+output/logs/
