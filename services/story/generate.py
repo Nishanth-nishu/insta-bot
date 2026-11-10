@@ -64,6 +64,21 @@ OUTPUT SHAPE
 """
 
 
+SYSTEM_LITE = """You write short Instagram Reel scripts. Output ONE JSON object only, no prose, no code fences.
+
+Write exactly 5 scenes for the topic brief, in this order, with these fields:
+1. {"id":"hook","kind":"hook","title":"6 to 9 words","highlight":["one word from the title"],"narration":"two sentences, 14 to 18 words total, a bit scary and funny, aimed at coders or developers","data":{"kicker":"AI NEWS / {kicker_date}"}}
+2. {"id":"what","kind":"concept","title":"6 to 9 words","highlight":["one word from the title"],"narration":"three sentences, 22 to 28 words total, what it is","lines":["4 to 6 words","4 to 6 words","4 to 6 words"],"data":{"kicker":"WHAT IT IS"}}
+3. {"id":"how","kind":"concept","title":"6 to 9 words","highlight":["one word from the title"],"narration":"three sentences, 22 to 28 words total, how it works or why it matters","lines":["4 to 6 words","4 to 6 words","4 to 6 words"],"data":{"kicker":"HOW IT WORKS"}}
+4. {"id":"flow","kind":"workflow","title":"6 to 9 words","highlight":["one word from the title"],"narration":"three sentences, 22 to 28 words total, the steps","data":{"stages":["step","step","step","step"],"goal":"2 or 3 words"}}
+5. {"id":"payoff","kind":"payoff","title":"Want the link? Comment: LETS GO","highlight":["LETS","GO"],"narration":"one sentence of 8 to 12 words with the main takeaway","data":{"kicker":"THE TAKEAWAY"}}
+
+Also return "title" (under 60 chars), "keyword" (2 to 4 words people search), "caption_summary" (two sentences), "niche_hashtags" (3 tags).
+Rules: plain spoken English; facts only from the brief, never invent numbers; no links, URLs or domains anywhere; every highlight word must appear in that scene's title.
+Shape: {"title":"...","keyword":"...","caption_summary":"...","niche_hashtags":["#a","#b","#c"],"scenes":[ ...5 scenes... ]}
+"""
+
+
 def load_example() -> str:
     sb = json.loads(EXAMPLE.read_text(encoding="utf-8"))
     sb = {k: v for k, v in sb.items() if k in ("title", "scenes")}
@@ -88,7 +103,46 @@ def user_prompt(topic: dict, post_date: date, problems: list[str] | None = None)
     return msg
 
 
-def assemble(answer: dict, topic: dict, post_date: date, reel_id: str) -> Storyboard:
+def _coerce(answer):
+    """Small models wrap or flatten the shape: unwrap {"storyboard": {...}}, parse a JSON string, drop non-dict scenes."""
+    if isinstance(answer, str):
+        answer = json.loads(answer)
+    if isinstance(answer, dict):
+        for key in ("storyboard", "output", "result"):
+            if isinstance(answer.get(key), dict) and "scenes" in answer[key]:
+                answer = answer[key]
+    if not isinstance(answer, dict):
+        raise ValueError("answer is not a JSON object")
+    scenes = answer.get("scenes")
+    if isinstance(scenes, dict):
+        scenes = list(scenes.values())
+    fixed = []
+    for sc in scenes or []:
+        if isinstance(sc, str):
+            try:
+                sc = json.loads(sc)
+            except Exception:
+                continue
+        if isinstance(sc, dict):
+            fixed.append(sc)
+    answer["scenes"] = fixed
+    return answer
+
+
+def assemble(answer: dict, topic: dict, post_date: date, reel_id: str, lite: bool = False) -> Storyboard:
+    answer = _coerce(answer)
+    if lite and answer.get("scenes"):
+        last = answer["scenes"][-1]
+        take = (last.get("narration") or "").strip() if last.get("kind") == "payoff" else ""
+        if last.get("kind") != "payoff":
+            answer["scenes"].append({"id": "payoff", "kind": "payoff", "title": "Want the link? Comment: LETS GO", "highlight": ["LETS", "GO"], "data": {"kicker": "THE TAKEAWAY"}})
+            last = answer["scenes"][-1]
+        take = take.split("Want the link")[0].strip()
+        last["narration"] = (take + " " if take else "") + PAYOFF_LINE
+        last["title"] = "Want the link? Comment: LETS GO"
+        last["highlight"] = ["LETS", "GO"]
+        hook = answer["scenes"][0]
+        hook.setdefault("data", {})["kicker"] = f"AI NEWS / {kicker_date(post_date)}"
     scenes = []
     for i, sc in enumerate(answer.get("scenes", [])):
         kind = sc.get("kind", "concept")
@@ -140,13 +194,14 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str) -> Storyb
     )
 
 
-def validate(sb: Storyboard, answer: dict, post_date: date) -> list[str]:
+def validate(sb: Storyboard, answer: dict, post_date: date, lite: bool = False) -> list[str]:
     problems = check_storyboard(sb)
     n = len(sb.scenes)
     if not 4 <= n <= 7:
         problems.append(f"{n} scenes; write 5 to 7")
     total = sum(len(words(s.narration)) for s in sb.scenes)
-    if not 90 <= total <= 150:
+    floor = 75 if lite else 90
+    if not floor <= total <= 150:
         per = ", ".join(f"{s.id}={len(words(s.narration))}" for s in sb.scenes)
         problems.append(f"narration is {total} words in total ({per}); write 100 to 140, about 20 per scene")
     if sb.scenes and len(words(sb.scenes[0].narration)) > 16:
@@ -245,7 +300,8 @@ def generate_storyboard(topic: dict, post_date: date, reel_id: str, llm: LLM | N
         fb = (llm.fallbacks if llm else [p.strip() for p in (os.environ.get("LLM_FALLBACKS") or "sarvam,ollama").split(",") if p.strip()]) or ["sarvam"]
         llm = LLM(provider=fb[0], fallbacks=fb[1:])
     llm = llm or LLM()
-    system = SYSTEM.replace("{payoff}", PAYOFF_LINE).replace("{cta}", CTA).replace("{kicker_date}", kicker_date(post_date))
+    lite = llm.provider == "ollama"  # small local models get the simpler contract
+    system = (SYSTEM_LITE if lite else SYSTEM).replace("{payoff}", PAYOFF_LINE).replace("{cta}", CTA).replace("{kicker_date}", kicker_date(post_date))
     problems: list[str] = []
     last_err = ""
     for attempt in range(attempts):
@@ -253,13 +309,14 @@ def generate_storyboard(topic: dict, post_date: date, reel_id: str, llm: LLM | N
             llm.model = "sarvam-105b"  # last try: the reasoning model
         answer = llm.complete_json(system, user_prompt(topic, post_date, problems), max_tokens=8000, temperature=0.6 if attempt == 0 else 0.4)
         try:
-            sb = assemble(answer, topic, post_date, reel_id)
+            sb = assemble(answer, topic, post_date, reel_id, lite=lite)
         except Exception as exc:  # schema errors come back as problems
+            log.warning("raw answer head: %s", json.dumps(answer)[:400] if not isinstance(answer, str) else answer[:400])
             problems = [f"storyboard schema error: {str(exc)[:300]}"]
             last_err = problems[0]
             log.warning("attempt %d: %s", attempt + 1, last_err)
             continue
-        problems = validate(sb, answer, post_date)
+        problems = validate(sb, answer, post_date, lite=lite)
         if not problems:
             return sb
         last_err = "; ".join(problems)

@@ -98,16 +98,19 @@ class LLM:
         model = next((m for m in [wanted] + sorted(local, reverse=True) if m in local), None)
         if not model:
             raise ProviderExhausted(f"ollama has no model pulled (wanted {wanted}); run: ollama pull {wanted}")
-        r = httpx.post(
-            f"{base}/api/chat",
-            json={"model": model, "stream": False, "format": "json", "options": {"temperature": temperature, "num_ctx": 8192, "num_predict": min(max_tokens, 4096)},
-                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]},
-            timeout=1800,
-        )
-        if r.status_code != 200:
-            raise ProviderExhausted(f"ollama chat failed: HTTP {r.status_code} {r.text[:200]}")
-        self.used_model = model
-        return r.json()["message"]["content"]
+        others = [m for m in local if m != model]
+        for attempt, m in enumerate([model] + others[:1]):
+            body = {"model": m, "stream": False, "format": "json",
+                    "options": {"temperature": temperature if attempt == 0 else 0.3, "num_ctx": 8192, "num_predict": min(max_tokens, 2500), "repeat_penalty": 1.05, "repeat_last_n": 128},
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+            r = httpx.post(f"{base}/api/chat", json=body, timeout=1800)
+            if r.status_code == 200:
+                self.used_model = m
+                return r.json()["message"]["content"]
+            log.warning("ollama %s: HTTP %s %s", m, r.status_code, r.text[:160])
+            if "repeat" not in r.text.lower() or not others:
+                break
+        raise ProviderExhausted(f"ollama chat failed: HTTP {r.status_code} {r.text[:200]}")
 
     def _sarvam(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
         import httpx
