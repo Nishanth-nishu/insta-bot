@@ -31,9 +31,9 @@ Hosts the MP4, creates the Instagram container, waits for the exact slot minute,
 
 `services/publishing/seo.py` builds the caption: the hook with the search keyword in the first line (under 125 characters, the part Instagram shows before "more"), a two-sentence summary that repeats the keyword once, the posting date ("11 Nov 2026 update"), the LETS GO ask, then six hashtags: three niche ones from the LLM plus broad ones (`#ai`, `#technews`, ...). Engagement-bait tags are banned. `lint_caption` enforces all of it before packaging. The on-screen kicker carries the same date so time-sensitive searches match the spoken and written text.
 
-## LLM
+## Who writes the script
 
-`services/llm/client.py` picks `LLM_PROVIDER`: `sarvam` (default here; `sarvam-105b-conversations` answers in about a second, `sarvam-105b` reasons first and is the last-attempt fallback), `anthropic` (set `ANTHROPIC_API_KEY`; uses `claude-opus-5-5`), or `claude-cli` (Claude Code installed and logged in; runs `claude -p` on the subscription, no API cost).
+`LLM_PROVIDER=claude-cli` (the default here) schedules this chat: the produce step launches a headless Claude Code session (`claude -p`) inside the repo with a small tool allowlist (read, search, write the storyboard, and a Bash rule limited to the rules checker; no permission bypass, anything else is refused). It reads the generate-script and create-storyboard skills and the reference storyboard, writes `data/storyboards/<id>.json`, runs the rules checker on it and fixes it until it passes, then exits. It runs on the Claude subscription, no API tokens. One-time setup: `npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code`, then `claude login` once in a terminal (browser sign-in). If the CLI is missing, not logged in, times out (25 minutes) or produces an invalid file, the same step falls back to the one-shot providers in `LLM_FALLBACKS` (`sarvam`, then `ollama`): `sarvam-105b-conversations` answers in about a second; `ollama` is the local open-source model. `anthropic` (set `ANTHROPIC_API_KEY`; `claude-opus-5-5`) is also available.
 
 ## Free fallbacks when Sarvam runs out
 

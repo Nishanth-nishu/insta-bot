@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from datetime import date
@@ -21,7 +22,8 @@ from pathlib import Path
 from services.common import paths
 from services.common.rules import check_storyboard, words
 from services.common.schema import Storyboard
-from services.llm.client import LLM
+from services.common.env import load_dotenv
+from services.llm.client import LLM, claude_executable
 from services.publishing.seo import build_caption, kicker_date, lint_caption, pick_hashtags
 from services.research.score import slugify
 
@@ -35,7 +37,7 @@ PAYOFF_LINE = "Want the link? Comment LETS GO and I'll send it to your DMs. And 
 SYSTEM = """You write 45-55 second Instagram Reel scripts for an Indian tech creator. An animated anime host says every line on camera. Output ONE JSON object and nothing else: no prose, no code fences.
 
 HARD RULES
-- English only, spoken and casual. Sentences under 14 words. Total narration 100 to 140 words across 5 to 7 scenes.
+- English only, spoken and casual. Sentences under 14 words. Total narration 100 to 140 words across 5 to 7 scenes: that is about 20 words per scene, so each non-hook scene needs 2 or 3 full sentences. Count the words before you answer; 80 words is too short.
 - Scene 1 is the hook: at most 16 words, two sentences, anxious and a bit funny, aimed at the viewer's job, money, status or "this just happened". Name the viewer ("coders", "developers", "everyone learning AI"). The host says it big on screen.
 - Never put a link, URL, domain, "link in bio" or "source:" anywhere: not in narration, titles, lines, commands or the caption. The last scene asks viewers to comment LETS GO and ends with the exact narration: "{payoff}"
 - Facts only from the brief. No invented numbers. If a number is not in the brief, do not use one.
@@ -134,7 +136,8 @@ def validate(sb: Storyboard, answer: dict, post_date: date) -> list[str]:
         problems.append(f"{n} scenes; write 5 to 7")
     total = sum(len(words(s.narration)) for s in sb.scenes)
     if not 90 <= total <= 150:
-        problems.append(f"narration is {total} words; aim for 100 to 140")
+        per = ", ".join(f"{s.id}={len(words(s.narration))}" for s in sb.scenes)
+        problems.append(f"narration is {total} words in total ({per}); write 100 to 140, about 20 per scene")
     if sb.scenes and len(words(sb.scenes[0].narration)) > 16:
         problems.append("hook over 16 words")
     if sb.scenes and sb.scenes[-1].kind != "payoff":
@@ -154,7 +157,75 @@ def validate(sb: Storyboard, answer: dict, post_date: date) -> list[str]:
     return problems
 
 
-def generate_storyboard(topic: dict, post_date: date, reel_id: str, llm: LLM | None = None, attempts: int = 3) -> Storyboard:
+AGENT_PROMPT = """You are producing one Instagram Reel storyboard for REELFORGE, unattended. Work only inside this repository and only on the files named here.
+
+Topic brief file: {topic_file}
+Posting date (IST): {post_date}  -> the hook scene's kicker must end with " / {kicker_date}"
+Write the storyboard to: {out_path}
+Reel id: {reel_id}
+
+Do this, in order:
+1. Read .claude/skills/generate-script/SKILL.md and .claude/skills/generate-script/hooks.md (house rules, hook formulas), .claude/skills/create-storyboard/SKILL.md, and data/storyboards/dsh-superagent-host.json (the exact JSON shape to follow, including voice, presenter, music, dmKeyword, dmLink, caption, hashtags).
+2. Read the topic brief. Use the brief as the only source of facts. Never invent numbers.
+3. Write the storyboard JSON at the path above with id "{reel_id}": 5 to 7 scenes, English, hook under 16 words and anxious-funny, 100 to 140 narration words, no link or URL anywhere on screen or in the caption, last scene a payoff with cta "Comment LETS GO, the link lands in your DMs" and narration ending "Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.", presenter look "vrm", voice am_fenrir, dmLink = the first source URL.
+   Caption (SEO): first line = the hook with the search keyword, under 125 chars; two-sentence summary with the keyword once; a line "{caption_date} update. Save this for later."; the line "Want the link? Comment LETS GO and I'll DM it to you."; then exactly 6 hashtags: 3 niche + 3 of #ai #technews #artificialintelligence.
+4. Run the rules checker:  .venv\\Scripts\\python -m services.common.rules {out_path}   and fix the file until it prints "ok": true.
+5. Print the single line DONE when the file is valid. Do not render, synthesize, commit, publish, or touch any other file.
+"""
+
+# Least privilege for the headless session: read and search the repo, write the
+# storyboard, and run only the rules checker. No bypass of permission checks;
+# anything outside this list is refused in non-interactive mode.
+AGENT_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash(.venv\\Scripts\\python -m services.common.rules *)", "Bash(.venv/Scripts/python -m services.common.rules *)"]
+
+
+def generate_with_claude_code(topic_file: str, post_date: date, reel_id: str, timeout_s: int = 1500) -> Storyboard | None:
+    """Let a headless Claude Code session write and validate the storyboard with a
+    small tool allowlist. Returns None when the CLI is missing, not logged in,
+    times out, or the file never validates; the caller then uses the one-shot path."""
+    import subprocess
+
+    exe = claude_executable()
+    if not exe:
+        return None
+    out_path = paths.STORYBOARDS / f"{reel_id}.json"
+    prompt = AGENT_PROMPT.format(topic_file=topic_file, post_date=post_date.isoformat(), kicker_date=kicker_date(post_date), out_path=str(out_path), reel_id=reel_id, caption_date=post_date.strftime("%d %b %Y").lstrip("0"))
+    cmd = [exe, "-p", prompt, "--output-format", "text", "--max-turns", "40", "--allowedTools", *AGENT_TOOLS]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s, cwd=str(paths.ROOT))
+    except subprocess.TimeoutExpired:
+        log.warning("claude code producer timed out after %ss", timeout_s)
+        return None
+    out = (r.stdout or "") + (r.stderr or "")
+    if r.returncode != 0 or "Not logged in" in out:
+        log.warning("claude code producer unavailable: %s", out[-300:].strip())
+        return None
+    if not out_path.exists():
+        log.warning("claude code producer wrote no file; tail: %s", out[-300:].strip())
+        return None
+    try:
+        sb = Storyboard.model_validate_json(out_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("claude code storyboard invalid: %s", str(exc)[:300])
+        return None
+    problems = [p for p in check_storyboard(sb) + lint_caption(sb.caption, "") if "primary keyword" not in p]
+    if problems:
+        log.warning("claude code storyboard breaks rules: %s", problems)
+        return None
+    sb.id = reel_id
+    return sb
+
+
+def generate_storyboard(topic: dict, post_date: date, reel_id: str, llm: LLM | None = None, attempts: int = 4) -> Storyboard:
+    load_dotenv()
+    provider = (llm.provider if llm else (os.environ.get("LLM_PROVIDER") or "")).strip().lower()
+    if provider == "claude-cli" and topic.get("_file"):
+        sb = generate_with_claude_code(topic["_file"], post_date, reel_id)
+        if sb is not None:
+            return sb
+        log.warning("falling back to the one-shot LLM path")
+        fb = (llm.fallbacks if llm else [p.strip() for p in (os.environ.get("LLM_FALLBACKS") or "sarvam,ollama").split(",") if p.strip()]) or ["sarvam"]
+        llm = LLM(provider=fb[0], fallbacks=fb[1:])
     llm = llm or LLM()
     system = SYSTEM.replace("{payoff}", PAYOFF_LINE).replace("{cta}", CTA).replace("{kicker_date}", kicker_date(post_date))
     problems: list[str] = []
@@ -190,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--id", default=None)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    topic = json.loads(Path(args.topic).read_text(encoding="utf-8"))
+    topic = json.loads(Path(args.topic).read_text(encoding="utf-8")) | {"_file": args.topic}
     post_date = date.fromisoformat(args.date) if args.date else date.today()
     reel_id = args.id or reel_id_for(topic, post_date, args.slot)
     sb = generate_storyboard(topic, post_date, reel_id)

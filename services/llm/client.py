@@ -38,6 +38,22 @@ class ProviderExhausted(RuntimeError):
     """The provider cannot serve right now (credits, auth, rate limit, down)."""
 
 
+_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
+
+
+def claude_executable() -> str | None:
+    """Claude Code CLI: on PATH, or the npm global shim under %APPDATA% (scheduled tasks have a bare PATH)."""
+    exe = shutil.which("claude")
+    if exe:
+        return exe
+    appdata = os.environ.get("APPDATA", "")
+    for name in ("claude.cmd", "claude"):
+        cand = os.path.join(appdata, "npm", name)
+        if appdata and os.path.exists(cand):
+            return cand
+    return None
+
+
 def _extract_json(text: str) -> Any:
     cleaned = _FENCE.sub("", text.strip()).strip()
     try:
@@ -60,7 +76,7 @@ class LLM:
 
     @staticmethod
     def _auto() -> str:
-        if shutil.which("claude"):
+        if claude_executable():
             return "claude-cli"
         if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
             return "anthropic"
@@ -131,13 +147,15 @@ class LLM:
         return "".join(b.text for b in msg.content if b.type == "text")
 
     def _claude_cli(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
-        exe = shutil.which("claude")
+        """One-shot text answer from Claude Code; no tools are granted."""
+        exe = claude_executable()
         if not exe:
-            raise ProviderExhausted("claude CLI not found on PATH")
-        cmd = [exe, "-p", user, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1"]
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
-        if r.returncode != 0:
-            raise RuntimeError(f"claude -p failed: {r.stderr[-400:]}")
+            raise ProviderExhausted("claude CLI not found (npm install -g @anthropic-ai/claude-code)")
+        cmd = [exe, "-p", user, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", "--disallowedTools", "Bash", "Write", "Edit"]
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900, cwd=str(_ROOT))
+        out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode != 0 or "Not logged in" in out:
+            raise ProviderExhausted(f"claude -p unavailable: {out[-300:].strip()}")
         return r.stdout
 
     # ---- public ----------------------------------------------------------
