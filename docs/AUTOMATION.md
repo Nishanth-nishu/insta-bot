@@ -35,6 +35,14 @@ Hosts the MP4, creates the Instagram container, waits for the exact slot minute,
 
 `services/llm/client.py` picks `LLM_PROVIDER`: `sarvam` (default here; `sarvam-105b-conversations` answers in about a second, `sarvam-105b` reasons first and is the last-attempt fallback), `anthropic` (set `ANTHROPIC_API_KEY`; uses `claude-opus-5-5`), or `claude-cli` (Claude Code installed and logged in; runs `claude -p` on the subscription, no API cost).
 
+## Free fallbacks when Sarvam runs out
+
+Both paid calls fall back to open-source tools on a quota, credit, auth, rate-limit or outage error (HTTP 401/402/403/429/5xx or a network failure); a plain validation error does not trigger a fallback.
+
+- Voice: `TTS_FALLBACK=kokoro`. `synthesize_storyboard` restarts the whole reel on Kokoro (`am_fenrir`) so one voice carries the reel; cache keys include the provider, so nothing paid is re-spent.
+- Script: `LLM_FALLBACKS=ollama`. `services/llm/client.py` tries the primary, then each fallback in order. The Ollama provider talks to a local server (`OLLAMA_URL`), uses `OLLAMA_MODEL` or any pulled model, and forces JSON output. Install once with `winget install Ollama.Ollama`, then `ollama pull qwen2.5:7b-instruct` (about 4.7 GB) and optionally `qwen2.5:3b-instruct` for a faster, weaker option. On this laptop's CPU a storyboard takes a few minutes with the 7B model, which fits inside the 150-minute production window.
+- The log line `llm: ollama used instead of sarvam` marks every fallback, so a drained Sarvam balance is visible in `output/logs/`.
+
 ## Scheduling on this machine
 
 ```
