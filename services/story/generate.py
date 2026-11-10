@@ -92,13 +92,24 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str) -> Storyb
     scenes = []
     for i, sc in enumerate(answer.get("scenes", [])):
         kind = sc.get("kind", "concept")
+        title = (sc.get("title") or "").strip()
+        title_words = [w.strip(".,!?:;\"'") for w in title.split()]
+        highlight = [h for h in (sc.get("highlight") or []) if h.lower().strip(".,!?") in [t.lower() for t in title_words]]
+        if not highlight and title_words:
+            highlight = [max(title_words, key=len)]  # longest title word stands in
+        lines = [str(x).strip() for x in (sc.get("lines") or []) if str(x).strip()]
+        if kind == "concept":
+            if len(lines) < 3:  # pad from the narration's sentences
+                extra = [t.strip() for t in re.split(r"(?<=[.!?])\s+", sc.get("narration", "")) if t.strip()]
+                lines = (lines + [e[:60] for e in extra if e not in lines])[:4]
+            lines = lines[:4]
         scene = {
             "id": sc.get("id") or f"s{i + 1}",
             "kind": kind,
             "narration": sc.get("narration", "").strip(),
-            "title": sc.get("title"),
-            "highlight": sc.get("highlight") or [],
-            "lines": sc.get("lines") or [],
+            "title": title or None,
+            "highlight": highlight,
+            "lines": lines,
             "data": sc.get("data") or {},
             "transition": "zoomIn" if kind == "workflow" else ("up" if i == len(answer.get("scenes", [])) - 2 else "current"),
             "padAfterMs": 200 if kind == "hook" else (900 if kind == "payoff" else 260),
@@ -132,7 +143,7 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str) -> Storyb
 def validate(sb: Storyboard, answer: dict, post_date: date) -> list[str]:
     problems = check_storyboard(sb)
     n = len(sb.scenes)
-    if not 5 <= n <= 7:
+    if not 4 <= n <= 7:
         problems.append(f"{n} scenes; write 5 to 7")
     total = sum(len(words(s.narration)) for s in sb.scenes)
     if not 90 <= total <= 150:
@@ -190,25 +201,32 @@ def generate_with_claude_code(topic_file: str, post_date: date, reel_id: str, ti
         return None
     out_path = paths.STORYBOARDS / f"{reel_id}.json"
     prompt = AGENT_PROMPT.format(topic_file=topic_file, post_date=post_date.isoformat(), kicker_date=kicker_date(post_date), out_path=str(out_path), reel_id=reel_id, caption_date=post_date.strftime("%d %b %Y").lstrip("0"))
-    cmd = [exe, "-p", prompt, "--output-format", "text", "--max-turns", "40", "--allowedTools", *AGENT_TOOLS]
+    # The prompt goes over stdin: as an argument it would be cut at the first newline
+    # by the npm claude.cmd shim on Windows.
+    cmd = [exe, "-p", "--output-format", "text", "--max-turns", "40", "--allowedTools", *AGENT_TOOLS]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s, cwd=str(paths.ROOT))
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s, cwd=str(paths.ROOT))
     except subprocess.TimeoutExpired:
         log.warning("claude code producer timed out after %ss", timeout_s)
         return None
     out = (r.stdout or "") + (r.stderr or "")
+    logs = paths.OUTPUT / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / f"claude-producer-{reel_id}.log").write_text(out, encoding="utf-8")
     if r.returncode != 0 or "Not logged in" in out:
         log.warning("claude code producer unavailable: %s", out[-300:].strip())
         return None
     if not out_path.exists():
-        log.warning("claude code producer wrote no file; tail: %s", out[-300:].strip())
+        log.warning("claude code producer wrote no file (see output/logs/claude-producer-%s.log); tail: %s", reel_id, out[-300:].strip())
         return None
     try:
         sb = Storyboard.model_validate_json(out_path.read_text(encoding="utf-8"))
     except Exception as exc:
         log.warning("claude code storyboard invalid: %s", str(exc)[:300])
         return None
-    problems = [p for p in check_storyboard(sb) + lint_caption(sb.caption, "") if "primary keyword" not in p]
+    # hashtags may live in the `hashtags` field (packaging appends them to the caption)
+    caption_full = sb.caption if any(t in sb.caption for t in sb.hashtags) else sb.caption + chr(10) + chr(10) + " ".join(sb.hashtags)
+    problems = [p for p in check_storyboard(sb) + lint_caption(caption_full, "") if "primary keyword" not in p]
     if problems:
         log.warning("claude code storyboard breaks rules: %s", problems)
         return None

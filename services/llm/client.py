@@ -151,8 +151,21 @@ class LLM:
         exe = claude_executable()
         if not exe:
             raise ProviderExhausted("claude CLI not found (npm install -g @anthropic-ai/claude-code)")
-        cmd = [exe, "-p", user, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", "--disallowedTools", "Bash", "Write", "Edit"]
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900, cwd=str(_ROOT))
+        import tempfile
+
+        # Multi-line arguments are cut at the first newline by the npm shim on Windows:
+        # the user prompt goes over stdin and the system prompt through a file.
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(system)
+            sys_file = f.name
+        cmd = [exe, "-p", "--append-system-prompt-file", sys_file, "--output-format", "text", "--max-turns", "1", "--disallowedTools", "Bash", "Write", "Edit"]
+        try:
+            r = subprocess.run(cmd, input=user, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900, cwd=str(_ROOT))
+        finally:
+            try:
+                os.unlink(sys_file)
+            except OSError:
+                pass
         out = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0 or "Not logged in" in out:
             raise ProviderExhausted(f"claude -p unavailable: {out[-300:].strip()}")
