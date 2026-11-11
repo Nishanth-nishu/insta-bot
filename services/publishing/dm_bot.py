@@ -221,14 +221,83 @@ def own_identity(ig_user: str | None, token: str | None) -> set[str]:
     return {s.lower() for s in ids}
 
 
+# ---------- delivery queue ----------
+
+RETRY_MINUTES = [2, 5, 15, 30, 60]       # then every 60 minutes
+MAX_AGE_S = 7 * 24 * 3600                # Instagram allows private replies for 7 days after the comment
+MAX_ATTEMPTS = 100
+
+
+def _backoff_s(attempts: int) -> int:
+    return 60 * RETRY_MINUTES[min(attempts, len(RETRY_MINUTES)) - 1]
+
+
+def enqueue(state: dict, cid: str, entry: dict, text_out: str) -> bool:
+    """Put a matching comment on the delivery queue once. Returns True when newly queued."""
+    queue = state.setdefault("queue", {})
+    if cid in queue:
+        return False
+    queue[cid] = {**entry, "message": text_out, "attempts": 0, "next_at": 0, "enqueued_at": time.time(), "last_error": None}
+    return True
+
+
+def process_queue(state: dict, send_private, send_public, public_text: str, public_reply: bool, summary: dict, now: float | None = None) -> None:
+    """Deliver every due queue entry, oldest first. Failures stay queued with a longer wait."""
+    now = now or time.time()
+    queue: dict = state.setdefault("queue", {})
+    handled: dict = state["handled"]
+    for cid in sorted(queue, key=lambda k: queue[k].get("enqueued_at", 0)):
+        item = queue[cid]
+        if item.get("next_at", 0) > now:
+            summary["pending"] += 1
+            continue
+        if now - item.get("enqueued_at", now) > MAX_AGE_S or item.get("attempts", 0) >= MAX_ATTEMPTS:
+            handled[cid] = {"media_id": item.get("media_id"), "username": item.get("username"), "ok": False, "dropped": True,
+                            "error": f"gave up after {item.get('attempts', 0)} attempts: {item.get('last_error')}"}
+            summary["dropped"] += 1
+            del queue[cid]
+            continue
+        result = send_private(cid, item["message"])
+        item["attempts"] = item.get("attempts", 0) + 1
+        if item["attempts"] > 1:
+            summary["retried"] += 1
+        record = {"media_id": item.get("media_id"), "username": item.get("username"), "sent_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                  "host": result.get("host"), "ok": bool(result.get("ok")), "error": result.get("error"), "attempts": item["attempts"]}
+        if record["ok"]:
+            summary["sent"] += 1
+            summary["sent_to"].append({k: item.get(k) for k in ("media_id", "username", "text", "comment_id", "reel")} | {"host": result.get("host"), "attempts": item["attempts"]})
+            if public_reply and send_public is not None:
+                pub = send_public(cid, public_text)
+                record["public_reply"] = pub.get("id") if pub.get("ok") else None
+                if not pub.get("ok"):
+                    record["public_error"] = pub.get("error")
+                    summary["failures"].append({"comment_id": cid, "username": item.get("username"), "stage": "public_reply", "error": pub.get("error")})
+            handled[cid] = record
+            del queue[cid]
+        else:
+            item["last_error"] = result.get("error")
+            item["next_at"] = now + _backoff_s(item["attempts"])
+            handled[cid] = record
+            summary["failed"] += 1
+            summary["pending"] += 1
+            summary["failures"].append({"comment_id": cid, "username": item.get("username"), "stage": "private_reply", "host": result.get("host"),
+                                        "error": result.get("error"), "attempt": item["attempts"], "retry_in_s": int(item["next_at"] - now)})
+            if result.get("permission"):
+                summary["permission_hint"] = PERMISSION_HINT
+
+
 # ---------- one pass ----------
 
 def run_once(*, send: bool = False, public_reply: bool = False, media_ids: Iterable[str] | None = None,
              template: str = DEFAULT_MESSAGE, public_text: str = DEFAULT_PUBLIC_TEXT,
              approved_root: Path | None = None, state_path: Path = STATE_FILE,
              fetch: FetchFn | None = None, send_private: SendFn | None = None, send_public: SendFn | None = None,
-             own: set[str] | None = None, token: str | None = None, ig_user: str | None = None) -> dict:
-    """Scan comments, DM the matching ones (when send=True), persist state, return a summary.
+             own: set[str] | None = None, token: str | None = None, ig_user: str | None = None,
+             now: float | None = None) -> dict:
+    """Scan comments, queue the matching ones, deliver the queue (when send=True), persist state, return a summary.
+
+    Every LETS GO comment goes on a persistent queue first; a failed send stays queued and is
+    retried with a growing wait (2, 5, 15, 30, 60 min, then hourly) for up to seven days.
 
     `fetch`, `send_private`, `send_public` and `own` can be injected for tests (no network)."""
     token = token if token is not None else _env("IG_ACCESS_TOKEN")
@@ -251,7 +320,8 @@ def run_once(*, send: bool = False, public_reply: bool = False, media_ids: Itera
     state = load_state(state_path)
     handled: dict = state["handled"]
     summary = {"mode": "SEND" if send else "DRY RUN", "public_reply": bool(send and public_reply), "media": len(wanted),
-               "scanned": 0, "matched": 0, "sent": 0, "skipped_already": 0, "skipped_own": 0, "failed": 0,
+               "scanned": 0, "matched": 0, "queued": 0, "sent": 0, "retried": 0, "pending": 0, "dropped": 0,
+               "skipped_already": 0, "skipped_own": 0, "failed": 0,
                "would_dm": [], "sent_to": [], "failures": [], "media_errors": [], "permission_hint": None}
 
     for media_id in wanted:
@@ -287,27 +357,10 @@ def run_once(*, send: bool = False, public_reply: bool = False, media_ids: Itera
             if not send:
                 summary["would_dm"].append(entry)
                 continue
-            result = send_private(cid, text_out)
-            record = {"media_id": media_id, "username": username, "sent_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                      "host": result.get("host"), "ok": bool(result.get("ok")), "error": result.get("error")}
-            if record["ok"]:
-                summary["sent"] += 1
-                summary["sent_to"].append({**entry, "host": result.get("host")})
-                if public_reply and send_public is not None:
-                    pub = send_public(cid, public_text)
-                    record["public_reply"] = pub.get("id") if pub.get("ok") else None
-                    if not pub.get("ok"):
-                        record["public_error"] = pub.get("error")
-                        summary["failures"].append({"comment_id": cid, "username": username, "stage": "public_reply", "error": pub.get("error")})
-            else:
-                summary["failed"] += 1
-                summary["failures"].append({"comment_id": cid, "username": username, "stage": "private_reply",
-                                            "host": result.get("host"), "error": result.get("error")})
-                if result.get("permission"):
-                    summary["permission_hint"] = PERMISSION_HINT
-            handled[cid] = record
-            save_state(state, state_path)
+            if enqueue(state, cid, entry, text_out):
+                summary["queued"] += 1
     if send:
+        process_queue(state, send_private, send_public, public_text, public_reply, summary, now=now)
         save_state(state, state_path)
     return summary
 

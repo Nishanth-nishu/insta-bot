@@ -55,6 +55,8 @@ Reels end with "comment LETS GO and I'll DM you the link". `services/publishing/
 
 The link sent is `dm_link` in the package's `package.json` when present, otherwise the first line of `sources.txt` in the same folder. State is kept in `data/database/dm_bot.json`; a comment is never DMed twice and the account's own comments are skipped.
 
+Delivery queue (since 2026-11-11): every matching comment is first put on a persistent queue in `data/database/dm_bot.json` (`queue`, keyed by comment id), then the bot delivers the queue oldest first. A send that fails for any reason (permission error, rate limit, network, Instagram outage) stays queued with `attempts`, `last_error` and `next_at`, and is retried on a later pass after 2, 5, 15, 30 and 60 minutes, then hourly, for up to seven days (the window in which Instagram still allows a private reply to a comment). Nothing is dropped silently: a delivered entry moves to `handled` with `ok: true` and its attempt count; an entry that outlives the window is moved to `handled` with `dropped: true` and the last error. Each pass reports `queued`, `sent`, `retried`, `pending`, `dropped` and `failed`; `python -m services.scheduler.daily status` prints the delivered count and whatever is still waiting. The scheduled `REELFORGE\dm-bot` task runs the pass every 5 minutes, so a LETS GO comment normally gets its DM within five minutes of being posted.
+
 ```bash
 # dry run (default): lists the comments that would get a DM, posts nothing
 .venv\Scripts\python -m services.publishing.dm_bot

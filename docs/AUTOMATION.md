@@ -25,7 +25,7 @@ Change the times with `PUBLISH_SLOTS=afternoon=15:30,night=20:40` in `.env` (pro
 
 Hosts the MP4, creates the Instagram container, waits for the exact slot minute, publishes, records the permalink, then runs the DM bot once for that post. `AUTOPUBLISH=true` in `.env` is required; otherwise it dry-runs. `--now` skips the wait, `--dry-run` never posts.
 
-`python -m services.scheduler.daily dm` runs every 30 minutes and answers new LETS GO comments (needs the messaging permission; see PUBLISHING.md).
+`python -m services.scheduler.daily dm` runs every 5 minutes: it queues every new LETS GO comment, delivers the queue, and keeps retrying a failed DM with a growing wait for up to seven days (see the delivery queue in PUBLISHING.md). `status` also prints how many DMs were delivered and how many are still waiting.
 
 ## SEO
 

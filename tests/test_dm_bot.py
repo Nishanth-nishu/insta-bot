@@ -103,12 +103,39 @@ def test_send_then_rerun_dedupes_via_state_file(tmp_path):
     assert saved["c1"]["ok"] is True and saved["c1"]["host"] == "https://graph.facebook.com/v21.0" and saved["c1"]["username"] == "alice"
     assert saved["c3"]["ok"] is False and "permission" in saved["c3"]["error"]
 
-    # second run: c1 is never DMed again; c3 (failed) is retried.
+    queued = json.loads(state.read_text(encoding="utf-8"))["queue"]
+    assert list(queued) == ["c3"] and queued["c3"]["attempts"] == 1 and "permission" in queued["c3"]["last_error"]
+    assert first["failures"][0]["retry_in_s"] == 120
+
+    # second run right away: c1 is never DMed again; c3 waits for its backoff, so nothing is sent.
     sent.clear()
     public.clear()
     second = run_once(**common)
-    assert second["skipped_already"] == 1
-    assert [cid for cid, _ in sent] == ["c3"]
+    assert second["skipped_already"] == 1 and second["pending"] == 1 and sent == []
+
+    # third run after the backoff: c3 is retried, succeeds, and leaves the queue.
+    import time as _t
+
+    def ok_private(cid, text):
+        sent.append((cid, text))
+        return {"ok": True, "host": "https://graph.facebook.com/v21.0", "message_id": "m2", "error": None}
+
+    third = run_once(**{**common, "send_private": ok_private}, now=_t.time() + 200)
+    assert [cid for cid, _ in sent] == ["c3"] and third["sent"] == 1 and third["retried"] == 1
+    saved = json.loads(state.read_text(encoding="utf-8"))
+    assert saved["queue"] == {} and saved["handled"]["c3"]["ok"] is True and saved["handled"]["c3"]["attempts"] == 2
+    assert public == ["c3"]
+
+
+def test_queue_gives_up_after_seven_days(tmp_path):
+    from services.publishing import dm_bot as d
+    state = {"handled": {}, "queue": {"old": {"media_id": "m", "username": "zed", "message": "x", "attempts": 3,
+                                              "next_at": 0, "enqueued_at": 1000.0, "last_error": "boom"}}}
+    summary = {"sent": 0, "retried": 0, "pending": 0, "dropped": 0, "failed": 0, "sent_to": [], "failures": [], "permission_hint": None}
+    calls = []
+    d.process_queue(state, lambda cid, text: calls.append(cid) or {"ok": True}, None, "", False, summary, now=1000.0 + d.MAX_AGE_S + 1)
+    assert calls == [] and summary["dropped"] == 1 and state["queue"] == {}
+    assert state["handled"]["old"]["dropped"] is True and "gave up" in state["handled"]["old"]["error"]
 
 
 def test_media_without_link_is_reported_not_fatal(tmp_path):

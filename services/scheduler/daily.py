@@ -226,8 +226,8 @@ def install_tasks() -> None:
         r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", at, "/TN", tn, "/TR", task_cmd(args, name)], capture_output=True, text=True)
         print(tn, at, "->", (r.stdout or r.stderr).strip())
     tn = f"{TASK_PREFIX}\\dm-bot"
-    r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "30", "/TN", tn, "/TR", task_cmd("dm", "dm-bot")], capture_output=True, text=True)
-    print(tn, "every 30 min ->", (r.stdout or r.stderr).strip())
+    r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "5", "/TN", tn, "/TR", task_cmd("dm", "dm-bot")], capture_output=True, text=True)
+    print(tn, "every 5 min ->", (r.stdout or r.stderr).strip())
 
 
 def remove_tasks() -> None:
@@ -262,6 +262,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "status":
         for e in load_queue()[-14:]:
             print(f"{e['date']} {e['slot']:<10} {e['status']:<10} {e.get('post_url') or e['package']}")
+        from services.publishing import dm_bot
+
+        st = dm_bot.load_state(dm_bot.STATE_FILE)
+        q = st.get("queue", {})
+        ok = sum(1 for h in st.get("handled", {}).values() if h.get("ok"))
+        print(f"dm: {ok} delivered, {len(q)} waiting in the queue")
+        for v in q.values():
+            print(f"  @{v.get('username')} attempts={v.get('attempts')} last={v.get('last_error')}")
     elif args.command == "install-tasks":
         install_tasks()
     elif args.command == "remove-tasks":
