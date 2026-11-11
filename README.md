@@ -61,7 +61,7 @@ Every reel has an animated host: a prebuilt anime character, the VRoid Project's
 
 ## Daily automation
 
-Two reels a day, unattended: `services/scheduler/daily.py` produces each reel ahead of time (research, LLM script via `services/story/generate.py`, voiceover, render, QA, package) and posts it on the minute at 15:30 and 20:40 IST with an SEO caption that carries the posting date, then answers LETS GO comments. `install-tasks` registers the Windows scheduled tasks; `AUTOPUBLISH` in `.env` is the kill switch. Details in `docs/AUTOMATION.md`.
+Two reels a day, unattended: `services/scheduler/daily.py` produces each reel ahead of time (research, LLM script via `services/story/generate.py`, voiceover, render, QA, package) and posts it on the minute at 15:30 and 20:40 IST with an SEO caption that carries the posting date, then answers LETS GO comments. `install-tasks` registers the Windows scheduled tasks; `AUTOPUBLISH` in `.env` is the kill switch. Details in `docs/AUTOMATION.md`. A feedback loop (`services/analytics/`) collects Instagram insights for every post, scores reels on retention, views and engagement against the account's own median, and feeds a what-is-working brief and category weights back into the next day's topic choice and script. Details in `docs/ANALYTICS.md`.
 
 ## Publishing
 

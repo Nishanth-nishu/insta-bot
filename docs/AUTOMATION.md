@@ -7,6 +7,8 @@ Since 2026-11-11 REELFORGE runs unattended. Every day it produces and posts two 
 | afternoon | 13:00 | 15:30 | news, tools, breakthroughs |
 | night | 18:10 | 20:40 | research, explainers |
 
+Two more tasks close the loop: `analytics` (daily 12:30 IST) collects Instagram insights for every posted reel and rewrites `data/analytics/brief.md` and `weights.json`; `niche-watch` (Mondays 12:00 IST) writes a swipe file of what is working in the niche. Every produce run re-learns from the latest numbers before picking the topic, and the script writer reads the brief. See ANALYTICS.md.
+
 Change the times with `PUBLISH_SLOTS=afternoon=15:30,night=20:40` in `.env` (production starts 150 minutes before each post) and re-run `install-tasks`.
 
 ## What one slot does
@@ -46,7 +48,7 @@ Both paid calls fall back to open-source tools on a quota, credit, auth, rate-li
 ## Scheduling on this machine
 
 ```
-.venv\Scripts\python -m services.scheduler.daily install-tasks   # registers REELFORGE\produce-*, publish-*, dm-bot
+.venv\Scripts\python -m services.scheduler.daily install-tasks   # registers REELFORGE\produce-*, publish-*, dm-bot, analytics, niche-watch
 .venv\Scripts\python -m services.scheduler.daily status          # the queue
 .venv\Scripts\python -m services.scheduler.daily remove-tasks
 ```

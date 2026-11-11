@@ -80,3 +80,6 @@ output/logs/
 # Claude Code CLI installed locally for the scheduled producer (see docs/AUTOMATION.md)
 tools/claude-cli/*
 !tools/claude-cli/package.json
+
+# feedback-loop data (insights snapshots, performance table, brief, weights, niche swipe file)
+data/analytics/

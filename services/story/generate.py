@@ -24,6 +24,7 @@ from services.common.rules import check_storyboard, words
 from services.common.schema import Storyboard
 from services.common.env import load_dotenv
 from services.llm.client import LLM, claude_executable
+from services.analytics.learn import learning_notes
 from services.publishing.seo import build_caption, kicker_date, lint_caption, pick_hashtags
 from services.research.score import slugify
 
@@ -97,7 +98,11 @@ def user_prompt(topic: dict, post_date: date, problems: list[str] | None = None)
         "notes": topic.get("notes") or "",
         "source_published": topic.get("published_at"),
     }
-    msg = f"POSTING DATE (IST): {post_date.isoformat()} -> kicker date text '{kicker_date(post_date)}'.\n\nTOPIC BRIEF:\n{json.dumps(brief, ensure_ascii=False, indent=1)}\n\nEXAMPLE OF THE JSON SHAPE (different topic, copy the structure not the words):\n{load_example()}\n\nWrite the JSON for this topic now."
+    msg = f"POSTING DATE (IST): {post_date.isoformat()} -> kicker date text '{kicker_date(post_date)}'.\n\nTOPIC BRIEF:\n{json.dumps(brief, ensure_ascii=False, indent=1)}\n\nEXAMPLE OF THE JSON SHAPE (different topic, copy the structure not the words):\n{load_example()}"
+    notes = learning_notes()
+    if notes:
+        msg += "\n\n" + notes
+    msg += "\n\nWrite the JSON for this topic now."
     if problems:
         msg += "\n\nYour previous answer had these problems; fix every one and return the full JSON again:\n- " + "\n- ".join(problems)
     return msg
@@ -231,7 +236,7 @@ Write the storyboard to: {out_path}
 Reel id: {reel_id}
 
 Do this, in order:
-1. Read .claude/skills/generate-script/SKILL.md and .claude/skills/generate-script/hooks.md (house rules, hook formulas), .claude/skills/create-storyboard/SKILL.md, and data/storyboards/dsh-superagent-host.json (the exact JSON shape to follow, including voice, presenter, music, dmKeyword, dmLink, caption, hashtags).
+1. Read .claude/skills/generate-script/SKILL.md and .claude/skills/generate-script/hooks.md (house rules, hook formulas), .claude/skills/create-storyboard/SKILL.md, and data/storyboards/dsh-superagent-host.json (the exact JSON shape to follow, including voice, presenter, music, dmKeyword, dmLink, caption, hashtags). Then, if they exist, read data/analytics/brief.md (what performed on this account: follow its "Do more / do less" lines for the hook shape, topic angle and length) and data/analytics/niche.md (what is working in the niche this week: borrow hook shapes, never words).
 2. Read the topic brief. Use the brief as the only source of facts. Never invent numbers.
 3. Write the storyboard JSON at the path above with id "{reel_id}": 5 to 7 scenes, English, hook under 16 words and anxious-funny, 100 to 140 narration words, no link or URL anywhere on screen or in the caption, last scene a payoff with cta "Comment LETS GO, the link lands in your DMs" and narration ending "Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.", presenter look "vrm", voice am_fenrir, dmLink = the first source URL.
    Caption (SEO): first line = the hook with the search keyword, under 125 chars; two-sentence summary with the keyword once; a line "{caption_date} update. Save this for later."; the line "Want the link? Comment LETS GO and I'll DM it to you."; then exactly 6 hashtags: 3 niche + 3 of #ai #technews #artificialintelligence.

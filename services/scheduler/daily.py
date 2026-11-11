@@ -39,6 +39,10 @@ log = logging.getLogger("reelforge.daily")
 
 
 # ---------------------------------------------------------------- helpers
+ANALYTICS_AT = os.environ.get("ANALYTICS_AT", "12:30")   # IST, before the first produce slot
+NICHE_AT = os.environ.get("NICHE_AT", "12:00")           # IST, Mondays
+
+
 def slots() -> dict:
     load_dotenv()
     out = json.loads(json.dumps(DEFAULT_SLOTS))
@@ -102,7 +106,13 @@ def pick_topic(slot: str, days_window: int = 30) -> dict:
     candidates = [t for t in candidates if t.get("name", "").lower() not in used_names]
     if not candidates:
         raise RuntimeError("no unused topic candidates; run research first")
-    candidates.sort(key=lambda t: (t.get("category") in prefer, t.get("score_total", 0)), reverse=True)
+    # feedback loop: categories that performed on this account get a weight (1.0 until enough reels are in)
+    from services.analytics.learn import category_weight, load_weights
+
+    weights = load_weights()
+    candidates.sort(key=lambda t: (t.get("category") in prefer, t.get("score_total", 0) * category_weight(t.get("category"), weights)), reverse=True)
+    if weights.get("enough"):
+        log.info("topic weights in use: %s", weights.get("category"))
     return candidates[0]
 
 
@@ -125,6 +135,13 @@ def produce(slot: str, post_date: date, topic_file: str | None, profile: str, dr
     paths.ensure_dirs()
     LOGS.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
+    # 0. learn from what is posted so far (local, cheap; the analytics task fetched the insights)
+    try:
+        from services.analytics.learn import refresh
+
+        log.info("learning: %s", json.dumps(refresh()))
+    except Exception as exc:  # never block production on analytics
+        log.warning("learning step skipped: %s", exc)
     # 1. research (best effort: an old queue of candidates still works offline)
     r = run([python(), "-m", "services.research.discover", "--top", "25", "--save"], timeout=900)
     if r.returncode != 0:
@@ -228,10 +245,17 @@ def install_tasks() -> None:
     tn = f"{TASK_PREFIX}\\dm-bot"
     r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "5", "/TN", tn, "/TR", task_cmd("dm", "dm-bot")], capture_output=True, text=True)
     print(tn, "every 5 min ->", (r.stdout or r.stderr).strip())
+    # feedback loop: insights + learning every day before the first produce; niche watch weekly
+    tn = f"{TASK_PREFIX}\\analytics"
+    r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", ANALYTICS_AT, "/TN", tn, "/TR", task_cmd("analytics", "analytics")], capture_output=True, text=True)
+    print(tn, ANALYTICS_AT, "->", (r.stdout or r.stderr).strip())
+    tn = f"{TASK_PREFIX}\\niche-watch"
+    r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "WEEKLY", "/D", "MON", "/ST", NICHE_AT, "/TN", tn, "/TR", task_cmd("niche", "niche-watch")], capture_output=True, text=True)
+    print(tn, "Mondays", NICHE_AT, "->", (r.stdout or r.stderr).strip())
 
 
 def remove_tasks() -> None:
-    for name in [f"produce-{s}" for s in slots()] + [f"publish-{s}" for s in slots()] + ["dm-bot"]:
+    for name in [f"produce-{s}" for s in slots()] + [f"publish-{s}" for s in slots()] + ["dm-bot", "analytics", "niche-watch"]:
         r = subprocess.run(["schtasks", "/Delete", "/F", "/TN", f"{TASK_PREFIX}\\{name}"], capture_output=True, text=True)
         print(name, "->", (r.stdout or r.stderr).strip())
 
@@ -239,7 +263,7 @@ def remove_tasks() -> None:
 # ---------------------------------------------------------------- cli
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["produce", "publish", "dm", "status", "install-tasks", "remove-tasks"])
+    ap.add_argument("command", choices=["produce", "publish", "dm", "analytics", "niche", "status", "install-tasks", "remove-tasks"])
     ap.add_argument("--slot", default="afternoon")
     ap.add_argument("--date", default=None)
     ap.add_argument("--topic", default=None)
@@ -259,6 +283,15 @@ def main(argv: list[str] | None = None) -> int:
         from services.publishing import dm_bot
 
         print(json.dumps(dm_bot.run_once(send=(os.environ.get("AUTOPUBLISH") or "").lower() == "true"), indent=1)[:2000])
+    elif args.command == "analytics":
+        from services.analytics.insights import collect
+        from services.analytics.learn import refresh
+
+        print(json.dumps({"collect": collect(), "learn": refresh()}, indent=1, ensure_ascii=False))
+    elif args.command == "niche":
+        from services.analytics import niche
+
+        print(json.dumps(niche.run(), indent=1, ensure_ascii=False))
     elif args.command == "status":
         for e in load_queue()[-14:]:
             print(f"{e['date']} {e['slot']:<10} {e['status']:<10} {e.get('post_url') or e['package']}")
