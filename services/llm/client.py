@@ -42,7 +42,15 @@ _ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 
 
 def claude_executable() -> str | None:
-    """Claude Code CLI: on PATH, or the npm global shim under %APPDATA% (scheduled tasks have a bare PATH)."""
+    """Claude Code CLI: the project-local install first (tools/claude-cli, which scheduled
+    tasks can see), then PATH, then the npm global shim under %APPDATA%.
+
+    The Claude desktop app is a packaged (MSIX) app: anything a session installs under
+    %APPDATA% lands in the app's private LocalCache\Roaming and is invisible to Task
+    Scheduler, so a global `npm install -g` never reaches the real machine."""
+    local = _ROOT / "tools" / "claude-cli" / "node_modules" / ".bin" / ("claude.cmd" if os.name == "nt" else "claude")
+    if local.exists():
+        return str(local)
     exe = shutil.which("claude")
     if exe:
         return exe

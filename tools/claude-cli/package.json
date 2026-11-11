@@ -1,0 +1,7 @@
+{
+  "name": "reelforge-claude-cli",
+  "private": true,
+  "description": "Claude Code CLI for the scheduled producer; installed by npm install in this folder",
+  "dependencies": {"@anthropic-ai/claude-code": "latest"},
+  "allowScripts": {"@anthropic-ai/claude-code": true}
+}

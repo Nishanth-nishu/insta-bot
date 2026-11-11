@@ -76,3 +76,7 @@ video-engine/public/models/*
 assets/models/*
 !assets/models/LICENSE.txt
 output/logs/
+
+# Claude Code CLI installed locally for the scheduled producer (see docs/AUTOMATION.md)
+tools/claude-cli/*
+!tools/claude-cli/package.json
