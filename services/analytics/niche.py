@@ -35,7 +35,8 @@ Then write {out_path} (overwrite it) with, in this order and under 450 words tot
 Facts only from what you read; if you could not verify something, leave it out. No URLs in the file. Do not edit any other file. Print DONE when the file is written.
 """
 
-TOOLS = ["WebSearch", "WebFetch", "Read", "Write(data/analytics/niche.md)", "Write(data\\analytics\\niche.md)"]
+# An Edit(path) rule covers every file-editing tool (Write included); a Write(path) rule is never matched.
+TOOLS = ["WebSearch", "WebFetch", "Read", "Edit(data/analytics/niche.md)", "Edit(data\\analytics\\niche.md)"]
 
 
 def run(out_path: Path = NICHE_FILE, timeout_s: int = 1200) -> dict:
