@@ -36,3 +36,7 @@ Each node label readable at phone size (font at least 26 px for labels, 40 px fo
 
 ## Dependencies
 `@remotion/shapes`, `@remotion/paths` for path lengths, design tokens.
+
+## Motion principles
+
+Read `.claude/skills/create-cinematic-reel/motion-principles.md` before writing, editing or reviewing a scene: vary eases, speeds and entry directions; build, breathe, resolve; three layers and two focal points per scene; no animation on frame 0; one sound accent per visual hit.

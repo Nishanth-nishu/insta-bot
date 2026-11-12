@@ -42,3 +42,7 @@ Pass requires: all technical checks PASS, no visual defect of severity "blocking
 
 ## Dependencies
 FFmpeg/ffprobe, Python venv.
+
+## Motion principles
+
+Read `.claude/skills/create-cinematic-reel/motion-principles.md` before writing, editing or reviewing a scene: vary eases, speeds and entry directions; build, breathe, resolve; three layers and two focal points per scene; no animation on frame 0; one sound accent per visual hit.

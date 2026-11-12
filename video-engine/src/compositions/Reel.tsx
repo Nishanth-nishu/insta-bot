@@ -86,14 +86,15 @@ const SceneByKind: React.FC<{ scene: TimedScene; styleId: ReelSpec["style"]; par
   }
 };
 
-/** SFX cue list derived from the scene structure: a whoosh into every seam,
- *  a riser into the payoff and an impact when it lands. SFX start 3 frames
- *  before the visual they accent. */
+/** SFX cue list derived from the scene structure: an impact as the hook lands
+ *  on frame one, a whoosh into every seam, a riser into the payoff and an
+ *  impact when it lands. SFX start 3 frames before the visual they accent. */
 const SfxCues: React.FC<{ spec: ReelSpec }> = ({ spec }) => {
   const { fps } = useVideoConfig();
   const cues: { at: number; file: string; volume: number }[] = [];
   spec.scenes.forEach((s, i) => {
     if (i === 0) {
+      cues.push({ at: 1, file: "sfx/impact.ogg", volume: 0.6 });
       return;
     }
     const start = msToFrames(s.startMs, fps);
@@ -115,6 +116,9 @@ const SfxCues: React.FC<{ spec: ReelSpec }> = ({ spec }) => {
   );
 };
 
+/** How far the music bed drops while the host speaks (0.5 = about -6 dB). */
+const MUSIC_DUCK = 0.5;
+
 const MusicBed: React.FC<{ spec: ReelSpec }> = ({ spec }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
@@ -122,7 +126,19 @@ const MusicBed: React.FC<{ spec: ReelSpec }> = ({ spec }) => {
     return null;
   }
   const base = spec.music.volume;
-  const vol = interpolate(frame, [0, fps, durationInFrames - 2 * fps, durationInFrames - 1], [0, base, base, 0], clamp);
+  const bed = interpolate(frame, [0, fps, durationInFrames - 2 * fps, durationInFrames - 1], [0, base, base, 0], clamp);
+  // Duck the bed under the voice (the "voiceover carve" idea): the presenter's mouth
+  // envelope is a per-frame measure of speech, so take its peak over a short window to
+  // ride it smoothly and pull the music down by up to MUSIC_DUCK while the host talks.
+  const env = spec.presenter?.envelope ?? [];
+  let speaking = 0;
+  if (env.length) {
+    const half = Math.round(fps * 0.25);
+    for (let f = Math.max(0, frame - half); f <= Math.min(env.length - 1, frame + half); f++) {
+      speaking = Math.max(speaking, env[f] ?? 0);
+    }
+  }
+  const vol = bed * (1 - MUSIC_DUCK * Math.min(1, speaking * 1.6));
   return <Audio src={staticFile(spec.music.file)} volume={vol} loop />;
 };
 

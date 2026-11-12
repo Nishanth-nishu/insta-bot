@@ -32,3 +32,7 @@ No visual regression in the extracted frames; frames/s improved or quality impro
 
 ## Dependencies
 Remotion CLI, ffmpeg, psutil sampler in `services/rendering/local_render.py`.
+
+## Motion principles
+
+Read `.claude/skills/create-cinematic-reel/motion-principles.md` before writing, editing or reviewing a scene: vary eases, speeds and entry directions; build, breathe, resolve; three layers and two focal points per scene; no animation on frame 0; one sound accent per visual hit.
