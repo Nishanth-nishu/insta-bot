@@ -1,41 +1,55 @@
 #!/usr/bin/env python3
-"""
-hookscore.py - score the first line of a Reel on the five things strong hooks
-have in common, and rank a batch of them against each other.
+"""hookscore.py - score a short-form hook before you spend a take on it, and name its formula.
 
-What this is:  five local heuristics, computed on your machine from the text
-alone. They measure properties that hooks which hold attention tend to share -
-a length you can say in under three seconds, a concrete marker, something at stake,
-the payload at the front rather than the back, and a viewer to aim it at.
+Origin (MIT, same author as this repo):
+  - The five-property scoring panel (LENGTH, SPECIFICITY, STAKES, FRONTLOAD, ADDRESS, the
+    dealbreakers and the verdict formula) is copied with its scoring unchanged from
+    Jakeschincariol/instagram-agent-skill@d03c56b skills/ig-reel/hookscore.py, because that
+    panel was measured against real short-form hooks (numbers below).
+  - The formula classifier comes from Jakeschincariol/youtube-agent-skill@a2feb21
+    skills/yt-script/hookscore.py, run against the fused hooks.json in this folder.
+  - The PAYOFF line is new: Jake's house rule that a hook leads with money made, money saved
+    or a number. It is reported beside the score and never folded into it, so the calibration
+    below still describes the score.
 
-What this is NOT:  a view predictor. It was tested against 74 real short-form
-hooks, transcribed from the first three seconds of the top eight and bottom
-eight performers on five channels. Separating a real hook from a deliberately
-bad one it does well: AUC 0.83, and 9 of 10 written-to-be-bad hooks scored
-below the real median. Separating a good creator's hits from that same
-creator's misses it barely does at all: AUC 0.56, where 0.50 is a coin flip.
+What the score is: five local heuristics computed from the text alone. Strong hooks tend to
+share them: a length you can say in about three seconds, a concrete marker, something at
+stake, the payload at the front, and a viewer to aim it at.
 
-So use it for what it measured well. It catches greetings, preambles, hooks
-with nothing concrete in them and hooks that take five seconds to say. It will
-not tell you which of two decent hooks will travel, and nothing that reads text
-can, because that is decided by your face, your edit, your audio and who
-Instagram shows it to. Trust the retention graph over this script.
-
-Each check returns 0 to 100. Higher is better.
+What it is NOT: a view predictor. The panel was tested against 74 real short-form hooks,
+transcribed from the first three seconds of the top eight and bottom eight performers on five
+channels. Separating a real hook from a deliberately bad one it does well: AUC 0.83. Separating
+a creator's hits from that same creator's misses it barely does at all: AUC 0.56, where 0.50 is
+a coin flip. Use it to catch greetings, preambles, hooks with nothing concrete in them and hooks
+that take five seconds to say. A low score is a reason to rewrite; a high score is not a promise.
 
 Usage
-  python3 hookscore.py hooks.txt              # one hook per line, ranked
+  python3 hookscore.py hooks.txt                  # one hook per line, ranked
   python3 hookscore.py --hook "I lost $18,000 on one missing contract."
+  python3 hookscore.py --hook "first" --hook "second"
   pbpaste | python3 hookscore.py -
   python3 hookscore.py hooks.txt --json
+  python3 hookscore.py --list                     # the 26 formulas, payoff-first marked
+
+Exit codes: 0 the best hook is STRONG, 1 no hook is STRONG yet, 2 bad input.
 """
 
 import argparse
 import json
+import os
 import re
 import statistics
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+HOOKS_PATH = os.path.join(HERE, "hooks.json")
+
+# ------------------------------------------------------------------ the scoring panel
+# Copied from instagram-agent-skill. Non-ASCII literals are written as escapes; the
+# character classes are identical.
+
+# Counts "$18,000" as one token. The LENGTH band (5 to 12) was calibrated with this exact
+# tokenizer, so it stays. speech.py estimates spoken seconds separately, numbers expanded.
 WORD_RE = re.compile(r"[A-Za-z0-9$%'’-]+")
 NUMBER_RE = re.compile(
     r"\$\s?\d[\d,]*(?:\.\d+)?"                       # money, whole
@@ -47,10 +61,9 @@ PROPER_RE = re.compile(r"(?<!^)\b[A-Z][a-z]{2,}\b")
 HASHTAG_RE = re.compile(r"(?:^|\s)#\w+")
 EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF☀-➿]")
 
-# Spoken hooks say their numbers out loud. "Zero dollars" and "twenty grand"
-# are as concrete as "$0" and "$20,000", and counting only digits missed them.
-# "one" and "first" are deliberately absent: they are filler far more often
-# than they are a quantity.
+# Spoken hooks say their numbers out loud. "Zero dollars" and "twenty grand" are as concrete
+# as "$0" and "$20,000". "one" and "first" are deliberately absent: they are filler far more
+# often than they are a quantity.
 SPOKEN_NUMBERS = {
     "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine",
     "ten", "eleven", "twelve", "fifteen", "twenty", "thirty", "forty", "fifty",
@@ -62,8 +75,8 @@ MONEY_WORDS = {
     "millionaire", "billionaire", "revenue", "profit", "salary", "rent",
 }
 
-# Words that put something on the line. A hook with none of these is a
-# statement; a hook with one is a reason to keep watching.
+# Words that put something on the line. A hook with none of these is a statement; a hook
+# with one is a reason to keep watching.
 STAKES = {
     "stop", "never", "wrong", "mistake", "mistakes", "lost", "lose", "losing",
     "cost", "costs", "broke", "broken", "failed", "failure", "fail", "nobody",
@@ -114,7 +127,6 @@ def clamp(n):
 
 
 def words(text):
-    # "$18,000" is one word when it is spoken, so it is one word here too.
     return WORD_RE.findall(re.sub(r"(?<=\d),(?=\d)", "", text))
 
 
@@ -132,7 +144,7 @@ def check_length(text):
         score = clamp(100 - (n - 12) * 11)
     if chars > 60:                       # two lines of big on-screen text
         score -= 12
-    return clamp(score), f"{n} words, {chars} chars, ~{secs:.1f}s spoken (want 5-12 words)"
+    return clamp(score), "%d words, %d chars, ~%.1fs spoken (want 5-12 words)" % (n, chars, secs)
 
 
 def check_specificity(text):
@@ -144,7 +156,7 @@ def check_specificity(text):
     hits = len(nums) + len(propers) + len(spoken)
     score = 15.0 if hits == 0 else clamp(45 + hits * 30)
     found = ", ".join(nums[:2] + sorted(propers)[:2] + spoken[:2])
-    return score, (f"{hits} concrete marker(s)" + (f": {found}" if found else
+    return score, ("%d concrete marker(s)" % hits + (": %s" % found if found else
                    " - no number, no name, nothing checkable"))
 
 
@@ -157,8 +169,8 @@ def check_stakes(text):
         markers.append("a price")
     n = len(markers)
     score = {0: 20.0, 1: 70.0}.get(n, 100.0)
-    detail = f"{n} tension marker(s)" + (f": {', '.join(markers[:4])}" if markers else
-                                         " - nothing is at stake in this line")
+    detail = "%d tension marker(s)" % n + (": %s" % ", ".join(markers[:4]) if markers else
+                                           " - nothing is at stake in this line")
     return clamp(score), detail
 
 
@@ -186,14 +198,14 @@ def check_frontload(text):
         where = "no payload word anywhere in the line"
     elif payload <= 3:
         base = 100.0
-        where = f"payload at word {payload + 1}"
+        where = "payload at word %d" % (payload + 1)
     elif payload <= 6:
         base = 70.0
-        where = f"payload at word {payload + 1}, could move forward"
+        where = "payload at word %d, could move forward" % (payload + 1)
     else:
         base = 40.0
-        where = f"payload at word {payload + 1}, too late"
-    detail = where + (f"; weak opener \"{hit_opener}\"" if hit_opener else "")
+        where = "payload at word %d, too late" % (payload + 1)
+    detail = where + ("; weak opener \"%s\"" % hit_opener if hit_opener else "")
     return clamp(base - penalty), detail
 
 
@@ -204,7 +216,7 @@ def check_address(text):
     if re.search(r"\b(you|your|you're|youre|yourself)\b", low):
         return 100.0, "speaks to the viewer"
     if w and w[0] in IMPERATIVES:
-        return 90.0, f"imperative opener (\"{w[0]}\")"
+        return 90.0, "imperative opener (\"%s\")" % w[0]
     if re.search(r"\b(i|my|me|we|our)\b", low):
         return 70.0, "first person, no viewer named"
     return 35.0, "third person, nobody in the room"
@@ -214,6 +226,7 @@ CHECKS = ["LENGTH", "SPECIFICITY", "STAKES", "FRONTLOAD", "ADDRESS"]
 
 
 def run(text):
+    """The calibrated panel. Returns (results, overall, verdict, flags)."""
     results = {
         "LENGTH": check_length(text),
         "SPECIFICITY": check_specificity(text),
@@ -223,8 +236,8 @@ def run(text):
     }
     flags = [msg for pattern, msg in DEALBREAKERS if pattern.search(text)]
     scores = [results[c][0] for c in CHECKS]
-    # The weakest property caps the hook, same logic as detect.py: one bad
-    # property is enough for the thumb to keep moving.
+    # The weakest property caps the hook: one bad property is enough for the thumb to keep
+    # moving.
     overall = statistics.mean(scores) * 0.6 + min(scores) * 0.4 - len(flags) * 15
     overall = clamp(overall)
     verdict = "STRONG" if overall >= 70 and min(scores) >= 55 and not flags else (
@@ -232,26 +245,119 @@ def run(text):
     return results, overall, verdict, flags
 
 
+# ------------------------------------------------------------- formula classifier
+# From youtube-agent-skill: count each formula's matching patterns, most hits wins. Ties go to
+# the formula listed first in hooks.json.
+
+_FORMULAS = None
+
+
+def load_formulas(path=HOOKS_PATH):
+    global _FORMULAS
+    if _FORMULAS is None or path != HOOKS_PATH:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        compiled = []
+        for f in data["hooks"]:
+            compiled.append((f, [re.compile(p, re.IGNORECASE) for p in f["match"]]))
+        if path != HOOKS_PATH:
+            return compiled
+        _FORMULAS = compiled
+    return _FORMULAS
+
+
+def classify(text):
+    """Return (formula dict or None, number of patterns that matched)."""
+    best, hits = None, 0
+    for f, patterns in load_formulas():
+        n = sum(1 for p in patterns if p.search(text))
+        if n > hits:
+            best, hits = f, n
+    return best, hits
+
+
+# ------------------------------------------------------------------- payoff rule
+# Jake's rule: lead with a concrete payoff. Money beats a bare number; both beat nothing.
+
+MONEY_RE = re.compile(
+    r"[$£€]\s?\d[\d,.]*(?:\s?(?:k|m|b|bn)\b|\s(?:million|billion|thousand|grand)\b)?"
+    r"|\b\d[\d,.]*\s?(?:k\s|m\s)?(?:dollars|bucks|grand|euros|pounds)\b"
+    r"|\b(?:a|one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty|hundred)\s+"
+    r"(?:grand|thousand dollars|million dollars|hundred dollars|bucks|dollars)\b",
+    re.IGNORECASE)
+FIGURE_RE = re.compile(
+    r"\b\d[\d,.]*\s?(?:%|x\b|k\b|m\b)?"
+    r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|"
+    r"forty|fifty|sixty|ninety|hundred|thousand|million|billion|half|double|triple|twice)\b",
+    re.IGNORECASE)
+LEAD_WORDS = 8          # about three seconds at 165 wpm
+
+
+def payoff(text):
+    """Where the first concrete payoff sits. status is LEADS, LATE or MISSING."""
+    money, figure = MONEY_RE.search(text), FIGURE_RE.search(text)
+    hit = money if money else figure
+    if not hit:
+        return {"kind": None, "token": None, "word": None, "status": "MISSING"}
+    first = money if not figure or (money and money.start() <= figure.start()) else figure
+    word = len(text[:first.start()].split()) + 1
+    return {"kind": "money" if money else "number", "token": hit.group(0).strip(),
+            "word": word, "status": "LEADS" if word <= LEAD_WORDS else "LATE"}
+
+
+def payoff_line(p):
+    if p["status"] == "MISSING":
+        return "MISSING  no money and no number. Lead with what the viewer gets, or ask for the real figure"
+    what = "money (%s)" % p["token"] if p["kind"] == "money" else "a number (%s)" % p["token"]
+    if p["status"] == "LEADS":
+        return "LEADS    %s at word %d" % (what, p["word"])
+    return "LATE     %s at word %d. Move it into the first %d words" % (what, p["word"], LEAD_WORDS)
+
+
+# ---------------------------------------------------------------------- analysis
+
+def analyse(text):
+    results, overall, verdict, flags = run(text)
+    formula, hits = classify(text)
+    return {
+        "hook": text.strip(),
+        "checks": {k: {"score": round(v[0], 1), "detail": v[1]} for k, v in results.items()},
+        "weakest": min(CHECKS, key=lambda c: results[c][0]),
+        "flags": flags,
+        "score": round(overall, 1),
+        "verdict": verdict,
+        "formula": ({"id": formula["id"], "name": formula["name"], "matched": hits,
+                     "payoff_first": formula.get("payoff_first", False)}
+                    if formula else {"id": None, "name": "Unclassified", "matched": 0,
+                                     "payoff_first": False}),
+        "payoff": payoff(text),
+    }
+
+
 def bar(score, width=24):
-    filled = round(score / 100 * width)
+    filled = int(round(score / 100.0 * width))
     return "#" * filled + "." * (width - filled)
 
 
-def render_one(text, results, overall, verdict, flags, out=sys.stdout):
+def render_one(a, out=sys.stdout):
     print("\nHOOK SCORE", file=out)
     print("=" * 62, file=out)
-    print(f"  \"{text.strip()}\"\n", file=out)
+    print("  \"%s\"\n" % a["hook"], file=out)
     for name in CHECKS:
-        score, detail = results[name]
-        print(f"  {name:<13} {bar(score)} {score:5.1f}", file=out)
-        print(f"  {'':<13} {detail}", file=out)
+        c = a["checks"][name]
+        print("  %-13s %s %5.1f" % (name, bar(c["score"]), c["score"]), file=out)
+        print("  %-13s %s" % ("", c["detail"]), file=out)
     print("-" * 62, file=out)
-    print(f"  {'HOOK SCORE':<13} {bar(overall)} {overall:5.1f}   {verdict}", file=out)
-    for f in flags:
-        print(f"\n  DEALBREAKER  {f}", file=out)
-    if verdict != "STRONG":
-        weakest = min(CHECKS, key=lambda c: results[c][0])
-        print(f"\n  Weakest property: {weakest}. Fix that one and re-run.", file=out)
+    print("  %-13s %s %5.1f   %s" % ("HOOK SCORE", bar(a["score"]), a["score"], a["verdict"]), file=out)
+    f = a["formula"]
+    print("  %-13s %s" % ("FORMULA", f["name"] + ("  (%d pattern%s matched)" % (
+        f["matched"], "" if f["matched"] == 1 else "s") if f["matched"] else
+        "  (no formula matched; that is usually a summary, not a hook)")), file=out)
+    print("  %-13s %s" % ("PAYOFF", payoff_line(a["payoff"])), file=out)
+    for flag in a["flags"]:
+        print("\n  DEALBREAKER  %s" % flag, file=out)
+    if a["verdict"] != "STRONG":
+        print("\n  Weakest property: %s. Fix that one and re-run." % a["weakest"], file=out)
     print("", file=out)
 
 
@@ -260,54 +366,65 @@ def render_table(rows, out=sys.stdout):
     for i, r in enumerate(rows, 1):
         mark = "->" if i == 1 else "  "
         hook = r["hook"] if len(r["hook"]) <= 62 else r["hook"][:59] + "..."
-        print(f"{mark} {r['score']:5.1f} {r['verdict']:<7} {hook}", file=out)
-        print(f"        weakest: {r['weakest']} ({r['checks'][r['weakest']]['score']:.0f})", file=out)
-        for f in r["flags"]:
-            print(f"        dealbreaker: {f}", file=out)
-    print("\nShoot the top one. If the top one is under 50, none of these are the hook.\n",
+        print("%s %5.1f %-7s %s" % (mark, r["score"], r["verdict"], hook), file=out)
+        print("        %s · payoff %s · weakest %s (%.0f)" % (
+            r["formula"]["name"], r["payoff"]["status"], r["weakest"],
+            r["checks"][r["weakest"]]["score"]), file=out)
+        for flag in r["flags"]:
+            print("        dealbreaker: %s" % flag, file=out)
+    print("\nShoot the top one. If the top one is under 50, none of these is the hook yet.\n",
           file=out)
 
 
+def render_list(out=sys.stdout):
+    print("\n26 HOOK FORMULAS  (P = payoff-first)\n" + "=" * 78, file=out)
+    for f, _ in load_formulas():
+        print("  %s %-22s %-28s %s" % ("P" if f.get("payoff_first") else " ", f["name"],
+                                       f["on_screen"], f["source"]), file=out)
+        print("     %s" % f["example"], file=out)
+    print("", file=out)
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Score a Reel hook on five properties.")
-    ap.add_argument("input", nargs="?", default="-", help="file with one hook per line, or -")
-    ap.add_argument("--hook", help="score a single hook given on the command line")
-    ap.add_argument("--json", action="store_true")
+    ap = argparse.ArgumentParser(
+        description="Score short-form hooks on five calibrated properties and name the formula.",
+        epilog="Exit 0 when the best hook is STRONG, 1 when none is yet, 2 on bad input.")
+    ap.add_argument("input", nargs="?", help="file with one hook per line, or - for stdin")
+    ap.add_argument("--hook", action="append", default=[], help="a hook to score (repeatable)")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--list", action="store_true", help="print the formula library and exit")
     args = ap.parse_args()
 
+    if args.list:
+        if args.json:
+            print(json.dumps([f for f, _ in load_formulas()], indent=1))
+        else:
+            render_list()
+        return 0
     if args.hook:
-        lines = [args.hook]
-    else:
+        lines = [h for h in args.hook if h.strip()]
+    elif args.input:
+        if args.input != "-" and not os.path.exists(args.input):
+            print("no such file: %s" % args.input, file=sys.stderr)
+            return 2
         raw = sys.stdin.read() if args.input == "-" else open(args.input, encoding="utf-8").read()
-        lines = [l.strip() for l in raw.splitlines() if l.strip()]
+        lines = [l.strip() for l in raw.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+    else:
+        ap.print_help(sys.stderr)
+        return 2
     if not lines:
         print("nothing to score", file=sys.stderr)
-        sys.exit(2)
+        return 2
 
-    payload = []
-    for line in lines:
-        results, overall, verdict, flags = run(line)
-        payload.append({
-            "hook": line,
-            "checks": {k: {"score": round(v[0], 1), "detail": v[1]} for k, v in results.items()},
-            "weakest": min(CHECKS, key=lambda c: results[c][0]),
-            "flags": flags,
-            "score": round(overall, 1),
-            "verdict": verdict,
-        })
-
+    rows = [analyse(line) for line in lines]
     if args.json:
-        print(json.dumps(payload if len(payload) > 1 else payload[0], indent=2, ensure_ascii=False))
-        return
-
-    if len(payload) == 1:
-        results, overall, verdict, flags = run(lines[0])
-        render_one(lines[0], results, overall, verdict, flags)
+        print(json.dumps(rows if len(rows) > 1 else rows[0], indent=2, ensure_ascii=False))
+    elif len(rows) == 1:
+        render_one(rows[0])
     else:
-        render_table(sorted(payload, key=lambda r: -r["score"]))
-
-    sys.exit(0 if max(p["score"] for p in payload) >= 70 else 1)
+        render_table(sorted(rows, key=lambda r: -r["score"]))
+    return 0 if any(r["verdict"] == "STRONG" for r in rows) else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

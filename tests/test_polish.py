@@ -30,7 +30,7 @@ def test_weak_hook_is_pushed_back_but_never_blocks_the_last_attempt():
 
 
 def test_hook_classifier_names_a_formula_or_none():
-    assert polish.classify_hook("$18,000 is what one missing clause cost me.") == "Cost Confession"
+    assert polish.classify_hook("$18,000 is what one missing clause cost me.") == "The Cost"
     assert polish.classify_hook("") is None
 
 

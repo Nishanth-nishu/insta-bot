@@ -58,8 +58,13 @@ def score_hook(text: str) -> dict:
     hs = _mod("hookscore")
     results, overall, verdict, flags = hs.run(text or "")
     weakest = min(hs.CHECKS, key=lambda c: results[c][0])
-    return {"score": round(overall, 1), "verdict": verdict, "flags": list(flags), "weakest": weakest,
-            "detail": results[weakest][1], "checks": {c: round(results[c][0], 1) for c in hs.CHECKS}}
+    out = {"score": round(overall, 1), "verdict": verdict, "flags": list(flags), "weakest": weakest,
+           "detail": results[weakest][1], "checks": {c: round(results[c][0], 1) for c in hs.CHECKS}}
+    if hasattr(hs, "payoff"):  # master-skills version: where the first concrete payoff sits
+        p = hs.payoff(text or "")
+        out["payoff"] = p["status"]          # LEADS / LATE / MISSING
+        out["payoff_token"] = p.get("token")
+    return out
 
 
 def hook_advice(text: str) -> str | None:
@@ -73,17 +78,30 @@ def hook_advice(text: str) -> str | None:
                 "STAKES": "say what the viewer loses or gains",
                 "FRONTLOAD": "put the payload first, the setup after",
                 "ADDRESS": "aim it at a person (you, coders, developers)"}
-        return f"hook scores {r['score']:.0f}/100, weakest {r['weakest']} ({r['detail']}): {tips.get(r['weakest'], 'rewrite it')}"
+        line = f"hook scores {r['score']:.0f}/100, weakest {r['weakest']} ({r['detail']}): {tips.get(r['weakest'], 'rewrite it')}"
+        if r.get("payoff") == "MISSING":
+            line += "; no number or figure anywhere in the hook, lead with one"
+        elif r.get("payoff") == "LATE":
+            line += f"; the figure '{r.get('payoff_token')}' comes too late, move it into the first 8 words"
+        return line
     return None
 
 
 def classify_hook(text: str) -> str | None:
-    """Name of the first matching hook formula in the pack's classify order, else None."""
+    """Name of the best-matching hook formula (most patterns hit), else None."""
+    if not (text or "").strip():
+        return None
+    hs = _mod("hookscore")
+    if hasattr(hs, "classify"):  # master-skills version: every formula carries several patterns
+        formula, hits = hs.classify(text)
+        return formula["name"] if formula and hits else None
     data = _hooks()
     by_id = {h["id"]: h for h in data.get("hooks", [])}
     for hid in data.get("classify_order", []):
         h = by_id.get(hid)
-        if h and h.get("match") and re.search(h["match"], text or "", re.I):
+        pats = h.get("match") if h else None
+        pats = [pats] if isinstance(pats, str) else (pats or [])
+        if any(re.search(p, text, re.I) for p in pats):
             return h["name"]
     return None
 
