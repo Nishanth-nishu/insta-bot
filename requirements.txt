@@ -17,3 +17,4 @@ soundfile>=0.12
 psutil>=5.9
 # Local TTS (CPU on this machine, CUDA on Ada). Apache-2.0 model weights.
 kokoro>=0.9.4
+yt-dlp>=2026.10            # niche watch: public YouTube Shorts counts, no login (services/analytics/niche.py)

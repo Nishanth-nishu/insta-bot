@@ -3,3 +3,5 @@ Files: hookscore.py + hooks.json (ig-reel), caption.py (ig-caption), humanize.py
 Unmodified. Used by services/story/polish.py so the unattended pipeline can score hooks, strip machine artefacts and lint captions without the interactive skills.
 
 hookscore.py and hooks.json were updated on 2026-11-12 to the versions in https://github.com/Jakeschincariol/master-skills (MIT, commit b5b43e4, skills/virality/tools): same five checks plus the 26-formula classifier with multi-pattern matching and the PAYOFF rule (a money figure or number inside the first 8 words). Unmodified.
+
+collect.py and swipe.py added 2026-11-12 from the same master-skills commit (skills/virality/tools, MIT): normalise yt-dlp JSON / CSV / pasted counts into one list, then rank every video as a multiple of its own channel median and name the hook formula. Unmodified; used by services/analytics/niche.py.

@@ -6,7 +6,7 @@ Since 2026-11-11 the daily pipeline measures every posted reel and feeds what it
 |---|---|---|---|
 | Collect | `insights.py` | task `REELFORGE\analytics`, daily 12:30 IST | `insights.json`: one snapshot per reel per run (views, reach, likes, comments, saves, shares, average watch time, total watch time) with the reel's age in hours |
 | Learn | `learn.py` | same task, and again at the start of every `produce` | `performance.json` (one row per settled reel), `brief.md` (what is working, in words), `weights.json` (nudges for the topic picker) |
-| Niche watch | `niche.py` | task `REELFORGE\niche-watch`, Mondays 12:00 IST | `niche.md`: a swipe file of hook shapes, trending topics and format notes, written by a headless Claude Code session with web search |
+| Niche watch | `niche.py` | task `REELFORGE\niche-watch`, Mondays 12:00 IST | `niche_evidence.md`: public YouTube Shorts counts for the creators in `niche_channels.txt`, each video ranked as a multiple of its own channel's median with the hook formula and our hook score (yt-dlp, no login); then `niche.md`: a swipe file of hook shapes, trending topics and format notes, written by a headless Claude Code session that reads the evidence first and uses web search only to fill in the week's topics |
 
 ```
 .venv\Scripts\python -m services.scheduler.daily analytics     # collect + learn now
@@ -43,3 +43,4 @@ A reel counts once it is 20 hours old (a "settled" snapshot), because reels keep
 - Average watch time comes from `ig_reels_avg_watch_time`; if the API ever retires a metric name the collector drops it and keeps the rest.
 - The loop starts changing choices after the fourth settled reel, so about two days of posting at two reels a day.
 - The niche watch runs on the Claude subscription through the project-local CLI (`tools/claude-cli`). If the CLI is missing or logged out the step is skipped and the previous `niche.md` stays in use.
+- The evidence step needs `yt-dlp` (in `requirements.txt`) and reads only public channel tabs: no login, no cookies. `data/analytics/niche_channels.txt` holds the handles (seeded with twelve AI-news creators whose medians sit between about 2k and 36k views, within reach of a new account); edit it to change who is watched. The ranking needs at least four videos per channel, uses the vendored `collect.py` and `swipe.py` from master-skills, and the first run on 2026-11-12 found 73 outliers among 371 Shorts. Raw view counts are never the signal: a video that did 10x its own channel's median is the thing to copy the shape of, never the words.
