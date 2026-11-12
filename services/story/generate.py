@@ -25,6 +25,7 @@ from services.common.schema import Storyboard
 from services.common.env import load_dotenv
 from services.llm.client import LLM, claude_executable
 from services.analytics.learn import learning_notes
+from services.story import polish
 from services.publishing.seo import build_caption, kicker_date, lint_caption, pick_hashtags
 from services.research.score import slugify
 
@@ -165,7 +166,7 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str, lite: boo
         scene = {
             "id": sc.get("id") or f"s{i + 1}",
             "kind": kind,
-            "narration": sc.get("narration", "").strip(),
+            "narration": polish.humanize_text(sc.get("narration", "").strip())[0],
             "title": title or None,
             "highlight": highlight,
             "lines": lines,
@@ -180,7 +181,7 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str, lite: boo
     keyword = (answer.get("keyword") or topic.get("name") or "AI").strip()
     hashtags = pick_hashtags(answer.get("niche_hashtags") or [], topic.get("category", ""))
     hook_line = scenes[0]["narration"].split(". ")[0] if scenes else answer.get("title", "")
-    caption = build_caption(hook_line, answer.get("caption_summary", ""), keyword, post_date, hashtags, keyword_phrase=answer.get("title"))
+    caption = polish.humanize_text(build_caption(hook_line, answer.get("caption_summary", ""), keyword, post_date, hashtags, keyword_phrase=answer.get("title")))[0]
     return Storyboard.model_validate(
         {
             "id": reel_id,
@@ -199,7 +200,9 @@ def assemble(answer: dict, topic: dict, post_date: date, reel_id: str, lite: boo
     )
 
 
-def validate(sb: Storyboard, answer: dict, post_date: date, lite: bool = False) -> list[str]:
+def validate(sb: Storyboard, answer: dict, post_date: date, lite: bool = False, strict_hook: bool = False) -> list[str]:
+    """strict_hook: also treat a WEAK hook score as a problem (the retry loop uses it on every
+    attempt but the last, so a weak-but-legal hook never blocks production)."""
     problems = check_storyboard(sb)
     n = len(sb.scenes)
     if not 4 <= n <= 7:
@@ -209,6 +212,10 @@ def validate(sb: Storyboard, answer: dict, post_date: date, lite: bool = False) 
     if not floor <= total <= 150:
         per = ", ".join(f"{s.id}={len(words(s.narration))}" for s in sb.scenes)
         problems.append(f"narration is {total} words in total ({per}); write 100 to 140, about 20 per scene")
+    if sb.scenes and strict_hook and not lite:
+        advice = polish.hook_advice(sb.scenes[0].narration)
+        if advice:
+            problems.append(advice)
     if sb.scenes and len(words(sb.scenes[0].narration)) > 16:
         problems.append("hook over 16 words")
     if sb.scenes and sb.scenes[-1].kind != "payoff":
@@ -239,7 +246,8 @@ Do this, in order:
 1. Read .claude/skills/generate-script/SKILL.md and .claude/skills/generate-script/hooks.md (house rules, hook formulas), .claude/skills/create-storyboard/SKILL.md, and data/storyboards/dsh-superagent-host.json (the exact JSON shape to follow, including voice, presenter, music, dmKeyword, dmLink, caption, hashtags). Then, if they exist, read data/analytics/brief.md (what performed on this account: follow its "Do more / do less" lines for the hook shape, topic angle and length) and data/analytics/niche.md (what is working in the niche this week: borrow hook shapes, never words).
 2. Read the topic brief. Use the brief as the only source of facts. Never invent numbers.
 3. Write the storyboard JSON at the path above with id "{reel_id}": 5 to 7 scenes, English, hook under 16 words and anxious-funny, 100 to 140 narration words, no link or URL anywhere on screen or in the caption, last scene a payoff with cta "Comment LETS GO, the link lands in your DMs" and narration ending "Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.", presenter look "vrm", voice am_fenrir, dmLink = the first source URL.
-   Caption (SEO): first line = the hook with the search keyword, under 125 chars; two-sentence summary with the keyword once; a line "{caption_date} update. Save this for later."; the line "Want the link? Comment LETS GO and I'll DM it to you."; then exactly 6 hashtags: 3 niche + 3 of #ai #technews #artificialintelligence.
+   Caption (SEO): first line = the hook with the search keyword, under 125 chars; two-sentence summary with the keyword once; a line "{caption_date} update."; the line "Want the link? Comment LETS GO and I'll DM it to you."; then exactly 5 hashtags: 3 niche + 2 of #ai #technews #artificialintelligence (Instagram caps a post at 5).
+   Hook quality: the rules checker prints hook_score and hook_advice; aim for a score of 50 or more (a concrete number, name or product in the first sentence, 5 to 12 words, aimed at coders) and fix any dealbreaker. No em dashes, curly quotes or slop words anywhere: the checker reports them as machine artefacts.
 4. Run the rules checker:  .venv\\Scripts\\python -m services.common.rules {out_path}   and fix the file until it prints "ok": true.
 5. Print the single line DONE when the file is valid. Do not render, synthesize, commit, publish, or touch any other file.
 """
@@ -321,8 +329,9 @@ def generate_storyboard(topic: dict, post_date: date, reel_id: str, llm: LLM | N
             last_err = problems[0]
             log.warning("attempt %d: %s", attempt + 1, last_err)
             continue
-        problems = validate(sb, answer, post_date, lite=lite)
+        problems = validate(sb, answer, post_date, lite=lite, strict_hook=attempt < attempts - 1)
         if not problems:
+            log.info("hook: %s", polish.score_hook(sb.scenes[0].narration) if sb.scenes else None)
             return sb
         last_err = "; ".join(problems)
         log.warning("attempt %d problems: %s", attempt + 1, last_err)

@@ -84,7 +84,41 @@ def check_storyboard(sb: Storyboard) -> list[str]:
                     for i, (a, b) in enumerate(zip(ns, cs)):
                         if len(words(a)) != len(words(b)):
                             problems.append(f"scene {sc.id}: sentence {i + 1} has {len(words(a))} spoken words but {len(words(b))} caption words")
+    # instagram-agent-skill checks (third_party): greetings/preambles in the hook and machine
+    # artefacts (em dashes, curly quotes, slop words) are hard problems; the hook score is advice.
+    try:
+        from services.story import polish
+
+        hook_text = sb.scenes[0].narration if sb.scenes else ""
+        hs = polish.score_hook(hook_text)
+        for f in hs["flags"]:
+            problems.append(f"hook dealbreaker: {f}")
+        for sc in sb.scenes:
+            arts = polish.machine_artefacts(sc.narration)
+            if arts:
+                problems.append(f"scene {sc.id}: narration has machine artefacts ({', '.join(arts[:3])}); use plain commas, straight quotes, plain words")
+        arts = polish.machine_artefacts(sb.caption or "")
+        if arts:
+            problems.append(f"caption has machine artefacts ({', '.join(arts[:3])})")
+        feed = polish.lint_caption_feed(sb.caption or "", [sb.dmKeyword])
+        for c in feed["fails"]:
+            if c["check"] not in ("link",):  # links are already reported above
+                problems.append(f"caption {c['check']}: {c['detail']}")
+    except Exception as exc:  # the vendored scripts are optional helpers, never a crash
+        problems.append(f"polish checks unavailable: {exc}")
     return problems
+
+
+def hook_report(sb: Storyboard) -> dict:
+    """Hook score and formula for the CLI output (advice, not a gate)."""
+    try:
+        from services.story import polish
+
+        text = sb.scenes[0].narration if sb.scenes else ""
+        r = polish.score_hook(text)
+        return {"hook_score": r["score"], "hook_verdict": r["verdict"], "hook_weakest": r["weakest"], "hook_formula": polish.classify_hook(text), "hook_advice": polish.hook_advice(text)}
+    except Exception as exc:
+        return {"hook_score": None, "hook_error": str(exc)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     for arg in args:
         sb = Storyboard.model_validate_json(Path(arg).read_text(encoding="utf-8"))
         problems = check_storyboard(sb)
-        print(json.dumps({"storyboard": arg, "ok": not problems, "problems": problems}, indent=1, ensure_ascii=False))
+        print(json.dumps({"storyboard": arg, "ok": not problems, "problems": problems, **hook_report(sb)}, indent=1, ensure_ascii=False))
         rc = rc or (1 if problems else 0)
     return rc
 

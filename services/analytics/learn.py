@@ -79,7 +79,7 @@ def reel_attributes(reel_id: str, storyboards: Path | None = None, topics: Path 
     """Hook text, hook formula, scene kinds, narration words, category: read from the storyboard and the topic file."""
     sb_dir = storyboards or paths.STORYBOARDS
     tp_dir = topics or paths.TOPICS
-    attrs = {"hook": None, "hook_formula": "unknown", "scene_kinds": [], "words": None, "category": None, "duration_s": None}
+    attrs = {"hook": None, "hook_formula": "unknown", "hook_pattern": "none", "hook_score": None, "scene_kinds": [], "words": None, "category": None, "duration_s": None}
     for name in (f"{reel_id}.timed.json", f"{reel_id}.json"):
         f = sb_dir / name
         if f.exists():
@@ -90,6 +90,13 @@ def reel_attributes(reel_id: str, storyboards: Path | None = None, topics: Path 
             scenes = sb.get("scenes") or []
             attrs["hook"] = (scenes[0].get("narration") or scenes[0].get("title")) if scenes else None
             attrs["hook_formula"] = hook_formula(attrs["hook"] or "")
+            try:
+                from services.story import polish
+
+                attrs["hook_pattern"] = polish.classify_hook(attrs["hook"] or "") or "none"
+                attrs["hook_score"] = polish.score_hook(attrs["hook"] or "")["score"]
+            except Exception:
+                pass
             attrs["scene_kinds"] = [s.get("kind") for s in scenes]
             attrs["words"] = sum(len((s.get("narration") or "").split()) for s in scenes)
             if sb.get("durationMs"):
@@ -136,6 +143,8 @@ def performance_rows(state: dict, attrs_fn=reel_attributes, now: float | None = 
             "duration_s": duration, "retention": (avg_watch / duration) if (avg_watch and duration) else None,
             "engagement": (actions / reach) if reach else None,
             "category": a.get("category"), "hook": a.get("hook"), "hook_formula": a.get("hook_formula"),
+            "hook_pattern": a.get("hook_pattern") or "none", "hook_score": a.get("hook_score"),
+            "hook_score_bucket": ("under 40" if (a.get("hook_score") or 0) < 40 else "40-55" if (a.get("hook_score") or 0) < 55 else "55+") if a.get("hook_score") is not None else "unknown",
             "length_bucket": length_bucket(duration), "words": a.get("words"), "scene_kinds": a.get("scene_kinds"),
         })
     return rows
@@ -206,7 +215,8 @@ def build_brief(rows: list[dict], now: float | None = None) -> tuple[str, dict]:
         if rows[-1] is not rows[0]:
             w = rows[-1]
             lines += ["## Weakest reel", "", f"- {w.get('title') or w.get('reel_id')}: {w['views']} views, retention {_pct(w.get('retention'))}, index {w['index']}. Hook: \"{(w.get('hook') or '')[:110]}\"", ""]
-        for title, groups in (("By topic category", by_cat), ("By hook formula", by_hook), ("By length", by_len), ("By slot", by_slot)):
+        by_pattern, by_hs = aggregate(rows, "hook_pattern"), aggregate(rows, "hook_score_bucket")
+        for title, groups in (("By topic category", by_cat), ("By hook formula", by_hook), ("By hook pattern (instagram-agent-skill formulas)", by_pattern), ("By hook score (hookscore.py)", by_hs), ("By length", by_len), ("By slot", by_slot)):
             lines += [f"## {title}", "", "| group | reels | index | retention | avg views |", "|---|---|---|---|---|"]
             lines += [f"| {g} | {v['n']} | {v['index']} | {_pct(v['retention'])} | {v['views']} |" for g, v in groups.items()]
             lines.append("")

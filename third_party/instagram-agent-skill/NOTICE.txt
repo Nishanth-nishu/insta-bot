@@ -1,0 +1,3 @@
+Vendored from https://github.com/Jakeschincariol/instagram-agent-skill (MIT, commit d03c56b, 2026-09-13).
+Files: hookscore.py + hooks.json (ig-reel), caption.py (ig-caption), humanize.py + detect.py + slop.json (ig-human).
+Unmodified. Used by services/story/polish.py so the unattended pipeline can score hooks, strip machine artefacts and lint captions without the interactive skills.

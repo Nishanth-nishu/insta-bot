@@ -41,7 +41,16 @@ Hosts the MP4, creates the Instagram container, waits for the exact slot minute,
 
 ## SEO
 
-`services/publishing/seo.py` builds the caption: the hook with the search keyword in the first line (under 125 characters, the part Instagram shows before "more"), a two-sentence summary that repeats the keyword once, the posting date ("11 Nov 2026 update"), the LETS GO ask, then six hashtags: three niche ones from the LLM plus broad ones (`#ai`, `#technews`, ...). Engagement-bait tags are banned. `lint_caption` enforces all of it before packaging. The on-screen kicker carries the same date so time-sensitive searches match the spoken and written text.
+`services/publishing/seo.py` builds the caption: the hook with the search keyword in the first line (under 125 characters, the part Instagram shows before "more"), a two-sentence summary that repeats the keyword once, the posting date ("11 Nov 2026 update"), the LETS GO ask, then five hashtags (Instagram's cap per post since 18 Dec 2025): three niche ones from the LLM plus two broad ones (`#ai`, `#technews`, ...). Engagement-bait tags are banned. `lint_caption` enforces all of it before packaging, and the vendored instagram-agent-skill tools (see below) add a feed-view lint, a hook score and a machine-artefact strip. The on-screen kicker carries the same date so time-sensitive searches match the spoken and written text.
+
+## Text quality tools from instagram-agent-skill
+
+Six scripts from the MIT-licensed instagram-agent-skill pack (Jakeschincariol/instagram-agent-skill) are vendored unmodified under `third_party/instagram-agent-skill/` and wrapped by `services/story/polish.py`, so the unattended pipeline gets what the interactive ig-reel, ig-caption and ig-human skills do by hand:
+
+- Hook score (`hookscore.py`): five heuristics on the hook line (length, specificity, stakes, front-loading, address). Greetings and preambles are dealbreakers and fail the rules checker. A WEAK score (under 50) is sent back to the writer as a concrete fix on every attempt but the last, so it raises hooks without ever blocking a slot. The rules CLI prints `hook_score`, `hook_verdict`, `hook_formula` (which of the pack's 26 formulas it matches) and `hook_advice`; the feedback loop records the score and formula per reel and reports retention by both, so the data can show whether the score predicts anything on this account.
+- Humanizer (`humanize.py` + `slop.json`): em dashes, curly quotes, invisible characters and slop words are stripped from every narration line and the caption on the one-shot path, and reported as "machine artefacts" by the rules checker so the headless Claude producer fixes them itself. The caption template lost "Save this for later" because the pack lists it as filler.
+- Caption feed lint (`caption.py`): what the feed shows before "... more", the five-hashtag cap, links, hashtag walls and openers on a hashtag; a FAIL is a rules problem.
+- `detect.py` (the five-check human-score panel) is available as `polish.human_score` for reports.
 
 ## Who writes the script
 

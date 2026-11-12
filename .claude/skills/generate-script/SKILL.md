@@ -30,7 +30,7 @@ A topic in `data/topics/` has status `selected`, or the user names a topic with 
 2. Narration structure: hook (2 sentences), context (1), development (3 to 4 beats, one idea each), payoff (result, number or reframe) then the fixed CTA ("Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.").
 3. Spoken-language rules: sentences under 14 words, no "delve", "game-changer", "revolutionary"; contractions welcome; numbers only when verified; avoid years and long numbers in the hook (TTS reads them slowly).
 4. Every factual sentence maps to a source URL in `sources`. Unverified claims are cut, not softened.
-5. Caption: first line survives the "... more" cut; one ask (the keyword); three to six hashtags (`ig-caption` skill); no URL.
+5. Caption: first line survives the "... more" cut; one ask (the keyword); three to five hashtags (Instagram caps a post at 5; `ig-caption` skill); no URL.
 6. Read it aloud mentally for TTS: expand abbreviations the engine mangles or add a `PRONUNCIATION` entry (`services/tts/provider.py`).
 
 ## Validation

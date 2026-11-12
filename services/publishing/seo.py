@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 MAX_CAPTION = 2200
-MAX_HASHTAGS = 6
+MAX_HASHTAGS = 5   # Instagram's cap per post since 18 Dec 2025 (was 30); 3 niche + 2 broad
 BROAD = ["#ai", "#artificialintelligence", "#technews", "#tech", "#coding", "#programming", "#aitools", "#machinelearning"]
 BANNED = {"#followforfollow", "#like4like", "#f4f", "#l4l", "#viral", "#fyp"}
 
@@ -35,7 +35,7 @@ def normalise_tag(tag: str) -> str:
 
 
 def pick_hashtags(niche: list[str], category: str = "") -> list[str]:
-    """3 niche tags from the topic plus broad tags to make 6, deduped, nothing banned."""
+    """3 niche tags from the topic plus broad tags to make 5, deduped, nothing banned."""
     out: list[str] = []
     for t in [normalise_tag(x) for x in niche] + BROAD:
         if len(t) > 2 and t not in out and t not in BANNED:
@@ -50,7 +50,7 @@ def build_caption(hook: str, summary: str, keyword: str, post_date: date, hashta
     hook = hook.strip().rstrip(".") + "."
     if keyword.lower() not in hook.lower():
         hook = f"{hook} {keyword_phrase or keyword}."
-    lines = [hook, "", summary.strip(), "", f"{caption_date(post_date)} update. Save this for later.", "", f"Want the link? Comment {dm_keyword} and I'll DM it to you.", "", " ".join(hashtags)]
+    lines = [hook, "", summary.strip(), "", f"{caption_date(post_date)} update.", "", f"Want the link? Comment {dm_keyword} and I'll DM it to you.", "", " ".join(hashtags)]
     cap = "\n".join(lines)
     return cap[:MAX_CAPTION]
 

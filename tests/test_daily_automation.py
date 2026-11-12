@@ -40,7 +40,7 @@ def test_kicker_and_caption_dates():
 
 def test_hashtags_mix_and_lint():
     tags = pick_hashtags(["#Codex", "openai", "#ai coding agent", "#viral"], "news")
-    assert tags[:3] == ["#codex", "#openai", "#aicodingagent"] and len(tags) == 6 and "#viral" not in tags
+    assert tags[:3] == ["#codex", "#openai", "#aicodingagent"] and len(tags) == 5 and "#viral" not in tags
     good = build_caption("AI coding agent news", "Two sentences.", "AI coding agent", date(2026, 11, 11), tags)
     assert lint_caption(good, "AI coding agent") == []
     bad = "x" * 130 + "\nsee https://a.b\n#one"
