@@ -78,6 +78,34 @@ def upsert(entry: dict) -> None:
     save_queue(sorted(q, key=lambda e: (e["date"], e["slot"])))
 
 
+# The reel queue: every produced reel is an entry with status ready; a slot posts the reel
+# made for it, otherwise the OLDEST ready reel (one missed day never means a lost reel).
+# A failed publish keeps the entry ready with attempts/last_error, so the next slot retries.
+BACKLOG_MAX = int(os.environ.get("PRODUCE_BACKLOG_MAX") or 4)   # ready reels kept at most; beyond it produce skips
+
+
+def ready_entries(queue: list[dict] | None = None) -> list[dict]:
+    q = queue if queue is not None else load_queue()
+    order = {name: i for i, name in enumerate(slots())}
+    return sorted((e for e in q if e.get("status") == "ready"), key=lambda e: (e["date"], order.get(e["slot"], 9)))
+
+
+def next_ready(slot: str, post_date: date, queue: list[dict] | None = None) -> dict | None:
+    """Strict FIFO: the oldest ready reel in the queue, whatever day it was made for. A reel
+    that missed its day goes out at the very next slot (re-dated), and today's reel waits
+    one slot; the backlog cap in produce keeps the drift to a day at most."""
+    q = queue if queue is not None else load_queue()
+    own = next((e for e in q if e["date"] == post_date.isoformat() and e["slot"] == slot), None)
+    if own and own.get("status") == "published":
+        return own
+    ready = ready_entries(q)
+    return ready[0] if ready else own
+
+
+def backlog_full(queue: list[dict] | None = None) -> bool:
+    return len(ready_entries(queue)) >= BACKLOG_MAX
+
+
 def run(cmd: list[str], cwd: Path | None = None, timeout: int = 3600) -> subprocess.CompletedProcess:
     log.info("$ %s", " ".join(str(c) for c in cmd))
     env = dict(os.environ, PYTHONUTF8="1")
@@ -126,15 +154,97 @@ def mark_used(topic: dict, reel_id: str) -> None:
 
 
 # ---------------------------------------------------------------- produce
+def render_spec(spec_path: Path, reel_id: str, profile: str) -> tuple[Path, Path | None, Path]:
+    """Render the timed spec at 1080p plus the cover still, run technical QA. Returns (video, cover, qa report).
+    Raises on a render failure or a failed QA."""
+    from services.quality.technical import run_technical
+
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    video = paths.DRAFTS / f"{reel_id}.{profile}.mp4"
+    r = run([python(), "-m", "services.rendering.local_render", "--spec", str(spec_path), "--profile", profile, "--concurrency", "1", "--out", str(video)], timeout=5400)
+    if r.returncode != 0 or not video.exists():
+        raise RuntimeError("render failed: " + (r.stdout[-600:] + r.stderr[-600:]))
+    cover: Path | None = paths.COVERS / f"{reel_id}.png"
+    hook = (spec.get("scenes") or [{}])[0]
+    cover_props = json.dumps({"title": hook.get("title") or spec.get("title"), "kicker": (hook.get("data") or {}).get("kicker", ""), "styleId": spec.get("style"), "highlight": hook.get("highlight") or []})
+    npx = "npx.cmd" if os.name == "nt" else "npx"
+    rc = run([npx, "remotion", "still", "src/index.ts", "Cover", str(cover), f"--props={cover_props}", "--log=error"], cwd=paths.VIDEO_ENGINE, timeout=900)
+    if rc.returncode != 0:
+        log.warning("cover render failed, continuing without a cover: %s", rc.stdout[-300:])
+        cover = None
+    prof = {"draft": (720, 1280)}.get(profile, (1080, 1920))
+    rep = run_technical(video, spec, prof[0], prof[1])
+    qa_path = paths.REPORTS / f"{reel_id}.{profile}.technical.json"
+    qa_path.write_text(json.dumps({"passed": rep.passed, "checks": [c.__dict__ for c in rep.checks]}, indent=1, default=str), encoding="utf-8")
+    if not rep.passed:
+        raise RuntimeError(f"QA failed: {[c.name for c in rep.checks if not c.passed]}")
+    return video, cover, qa_path
+
+
+def redate_entry(entry: dict, post_date: date, profile: str = "standard", render: bool = True) -> dict:
+    """A reel produced for an earlier day is posted later: move the on-screen kicker date, the
+    caption date line and the package metadata to the real posting date, re-render when asked.
+    If the re-render fails the text is still re-dated and the old video is posted (a day-old
+    kicker beats a lost reel); the entry records what happened."""
+    import shutil
+
+    from services.publishing.seo import caption_date, kicker_date
+
+    old = date.fromisoformat(entry["date"])
+    if old == post_date:
+        return entry
+    reel_id = entry["reel_id"]
+    pkg = Path(entry["package"])
+    swaps = [(kicker_date(old), kicker_date(post_date)), (caption_date(old), caption_date(post_date))]
+
+    def swap(text: str) -> str:
+        for a, b in swaps:
+            text = text.replace(a, b)
+        return text
+
+    for name in (f"{reel_id}.timed.json", f"{reel_id}.json"):
+        f = paths.STORYBOARDS / name
+        if f.exists():
+            f.write_text(swap(f.read_text(encoding="utf-8")), encoding="utf-8")
+    for name in ("caption.txt", "checklist.md"):
+        f = pkg / name
+        if f.exists():
+            f.write_text(swap(f.read_text(encoding="utf-8")), encoding="utf-8")
+    meta_file = pkg / "package.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+    meta["produced_for"] = entry["date"]
+    meta["scheduled_for"] = slot_datetime(entry["slot"], post_date).isoformat() if entry.get("slot") in slots() else post_date.isoformat()
+    entry["redated_to"] = post_date.isoformat()
+    spec_path = paths.STORYBOARDS / f"{reel_id}.timed.json"
+    if render and spec_path.exists():
+        try:
+            video, cover, qa = render_spec(spec_path, reel_id, profile)
+            shutil.copy(video, pkg / meta.get("video", f"{reel_id}.mp4"))
+            if cover:
+                shutil.copy(cover, pkg / "cover.png")
+            entry["rerendered"] = True
+            log.info("re-dated and re-rendered %s for %s", reel_id, post_date)
+        except Exception as exc:
+            entry["rerendered"] = False
+            entry["redate_error"] = str(exc)[-300:]
+            log.warning("re-render failed, posting with the old kicker: %s", exc)
+    meta_file.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    upsert(entry)
+    return entry
+
+
 def produce(slot: str, post_date: date, topic_file: str | None, profile: str, dry_run: bool) -> dict:
     from services.publishing.package import build_package
-    from services.quality.technical import run_technical
     from services.story.generate import generate_storyboard, reel_id_for
     from services.tts.synthesize import synthesize_storyboard
 
     paths.ensure_dirs()
     LOGS.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
+    if backlog_full() and not topic_file:
+        ready = ready_entries()
+        log.warning("backlog full (%d ready reels, max %d): not producing; next to post is %s", len(ready), BACKLOG_MAX, ready[0]["reel_id"])
+        return ready[0]
     # 0. learn from what is posted so far (local, cheap; the analytics task fetched the insights)
     try:
         from services.analytics.learn import refresh
@@ -157,27 +267,8 @@ def produce(slot: str, post_date: date, topic_file: str | None, profile: str, dr
     # 4. voiceover + timing
     spec = synthesize_storyboard(sb)
     spec_path = paths.STORYBOARDS / f"{reel_id}.timed.json"
-    # 5. render + cover
-    video = paths.DRAFTS / f"{reel_id}.{profile}.mp4"
-    r = run([python(), "-m", "services.rendering.local_render", "--spec", str(spec_path), "--profile", profile, "--concurrency", "1", "--out", str(video)], timeout=5400)
-    if r.returncode != 0 or not video.exists():
-        raise RuntimeError("render failed: " + (r.stdout[-600:] + r.stderr[-600:]))
-    cover = paths.COVERS / f"{reel_id}.png"
-    hook = sb.scenes[0]
-    cover_props = json.dumps({"title": hook.title or sb.title, "kicker": hook.data.get("kicker", ""), "styleId": sb.style, "highlight": hook.highlight})
-    npx = "npx.cmd" if os.name == "nt" else "npx"
-    rc = run([npx, "remotion", "still", "src/index.ts", "Cover", str(cover), f"--props={cover_props}", "--log=error"], cwd=paths.VIDEO_ENGINE, timeout=900)
-    if rc.returncode != 0:
-        log.warning("cover render failed, publishing without a cover: %s", rc.stdout[-300:])
-        cover = None
-    # 6. QA
-    prof = {"draft": (720, 1280)}.get(profile, (1080, 1920))
-    rep = run_technical(video, json.loads(spec_path.read_text(encoding="utf-8")), prof[0], prof[1])
-    qa_path = paths.REPORTS / f"{reel_id}.{profile}.technical.json"
-    qa_path.write_text(json.dumps({"passed": rep.passed, "checks": [c.__dict__ for c in rep.checks]}, indent=1, default=str), encoding="utf-8")
-    if not rep.passed:
-        failed = [c.name for c in rep.checks if not c.passed]
-        raise RuntimeError(f"QA failed: {failed}")
+    # 5+6. render + cover + QA (a failed QA raises: nothing is queued)
+    video, cover, qa_path = render_spec(spec_path, reel_id, profile)
     # 7. package + queue
     pkg = build_package(spec_path, video, cover, qa_path)
     meta = json.loads((pkg / "package.json").read_text(encoding="utf-8"))
@@ -196,17 +287,29 @@ def publish(slot: str, post_date: date, now: bool, dry_run: bool) -> dict:
     from services.publishing.instagram import publish_package
 
     load_dotenv()
-    entry = next((e for e in load_queue() if e["date"] == post_date.isoformat() and e["slot"] == slot), None)
+    entry = next_ready(slot, post_date)
     if not entry:
-        raise RuntimeError(f"nothing queued for {post_date} {slot}; run produce first")
+        raise RuntimeError(f"nothing queued for {post_date} {slot} and no ready reel in the queue; run produce first")
     if entry["status"] == "published":
         log.info("already published: %s", entry.get("post_url"))
         return entry
+    if entry["date"] != post_date.isoformat():
+        log.info("no reel for %s %s: posting the oldest ready reel %s (made for %s %s)", post_date, slot, entry["reel_id"], entry["date"], entry["slot"])
     live = (os.environ.get("AUTOPUBLISH") or "").strip().lower() == "true" and not dry_run
+    if live and entry["date"] != post_date.isoformat():
+        entry = redate_entry(entry, post_date)
     when = None if now else slot_datetime(slot, post_date)
-    result = publish_package(Path(entry["package"]), confirm=live, publish_at=when if live else None)
+    try:
+        result = publish_package(Path(entry["package"]), confirm=live, publish_at=when if live else None)
+    except Exception as exc:
+        # keep the reel in the queue: the next slot retries it (and posts it even a day late)
+        entry.update({"status": "ready", "attempts": int(entry.get("attempts") or 0) + 1, "last_error": str(exc)[-300:], "last_attempt_at": datetime.now(IST).isoformat()})
+        upsert(entry)
+        log.error("publish failed (attempt %d), reel stays queued: %s", entry["attempts"], exc)
+        raise
     if live:
-        entry.update({"status": "published", "post_url": result.get("permalink"), "media_id": result.get("media_id"), "published_at": datetime.now(IST).isoformat()})
+        entry.update({"status": "published", "post_url": result.get("permalink"), "media_id": result.get("media_id"), "published_at": datetime.now(IST).isoformat(), "posted_as": post_date.isoformat(), "posted_slot": slot})
+        entry.pop("last_error", None)
         upsert(entry)
         try:
             summary = dm_bot.run_once(send=True, media_ids=[result["media_id"]])
@@ -312,7 +415,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(niche.run(), indent=1, ensure_ascii=False))
     elif args.command == "status":
         for e in load_queue()[-14:]:
-            print(f"{e['date']} {e['slot']:<10} {e['status']:<10} {e.get('post_url') or e['package']}")
+            extra = f"  attempts={e['attempts']} last_error={e.get('last_error', '')[:80]}" if e.get("attempts") else ""
+            print(f"{e['date']} {e['slot']:<10} {e['status']:<10} {e.get('post_url') or e['package']}{extra}")
+        ready = ready_entries()
+        print(f"reel queue: {len(ready)} ready (max {BACKLOG_MAX}); next to post: {ready[0]['reel_id'] if ready else 'nothing'}")
         from services.publishing import dm_bot
 
         st = dm_bot.load_state(dm_bot.STATE_FILE)

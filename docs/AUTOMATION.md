@@ -29,6 +29,16 @@ Hosts the MP4, creates the Instagram container, waits for the exact slot minute,
 
 `python -m services.scheduler.daily dm` runs every 5 minutes: it queues every new LETS GO comment, delivers the queue, and keeps retrying a failed DM with a growing wait for up to seven days (see the delivery queue in PUBLISHING.md). `status` also prints how many DMs were delivered and how many are still waiting.
 
+## The reel queue
+
+`data/database/schedule.json` is a real queue, not just a log (since 2026-11-12, after a slept-through afternoon and an API block left reels unposted):
+
+- Every produced reel is an entry with status `ready`. A publish slot posts the **oldest ready reel**, whatever day it was made for. A reel that missed its day goes out at the very next slot; today's reel then waits one slot. Nothing is ever lost.
+- A failed publish (API blocked, network, upload error) keeps the entry `ready` and records `attempts`, `last_error` and `last_attempt_at`; the next slot retries it. The task still exits non-zero so the failure shows in the log.
+- A reel posted on a later day than it was made for is **re-dated** first: the on-screen kicker (`11 NOV 2026` to `12 NOV 2026`), the caption's date line and the package metadata move to the real posting date, and the video and cover are re-rendered (about 3 to 15 minutes, so a late post lands a few minutes after the slot). If the re-render fails the re-dated caption still goes out with the old video, and the entry records `redate_error`.
+- Produce skips when the queue already holds `PRODUCE_BACKLOG_MAX` ready reels (default 4, two days), so a long API outage does not pile up stale reels or burn Sarvam credit.
+- `status` prints each entry with its attempts and the queue head: `reel queue: 1 ready (max 4); next to post: ...`.
+
 ## SEO
 
 `services/publishing/seo.py` builds the caption: the hook with the search keyword in the first line (under 125 characters, the part Instagram shows before "more"), a two-sentence summary that repeats the keyword once, the posting date ("11 Nov 2026 update"), the LETS GO ask, then six hashtags: three niche ones from the LLM plus broad ones (`#ai`, `#technews`, ...). Engagement-bait tags are banned. `lint_caption` enforces all of it before packaging. The on-screen kicker carries the same date so time-sensitive searches match the spoken and written text.
