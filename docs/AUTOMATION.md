@@ -51,6 +51,7 @@ Six scripts from the MIT-licensed instagram-agent-skill pack (Jakeschincariol/in
 - Humanizer (`humanize.py` + `slop.json`): em dashes, curly quotes, invisible characters and slop words are stripped from every narration line and the caption on the one-shot path, and reported as "machine artefacts" by the rules checker so the headless Claude producer fixes them itself. The caption template lost "Save this for later" because the pack lists it as filler.
 - Caption feed lint (`caption.py`): what the feed shows before "... more", the five-hashtag cap, links, hashtag walls and openers on a hashtag; a FAIL is a rules problem.
 - `detect.py` (the five-check human-score panel) is available as `polish.human_score` for reports.
+- `hookscore.py` and `hooks.json` are the newer versions from Jakeschincariol/master-skills (`skills/virality/tools`, MIT): same five checks, plus multi-pattern formula matching and the payoff rule (a money figure or number inside the first 8 words, reported as LEADS, LATE or MISSING). A WEAK hook's advice now says when the figure is missing or comes too late. The rest of master-skills was not taken: its `edit` skill is for raw talking-head footage (we generate ours; our render already does a two-pass loudness normalisation to -16 LUFS and QA checks it), `build` is a website builder, and the YouTube-counts collector would need `yt-dlp` installed in the venv plus a list of channels to watch.
 
 ## What was taken from video-production-skills
 
