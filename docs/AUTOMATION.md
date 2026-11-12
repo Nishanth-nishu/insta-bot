@@ -53,7 +53,7 @@ Both paid calls fall back to open-source tools on a quota, credit, auth, rate-li
 .venv\Scripts\python -m services.scheduler.daily remove-tasks
 ```
 
-The tasks run as the logged-in user with the venv Python, logging to `output/logs/<task>.log`. The laptop must be on and awake at the slot times (the render needs about 15 minutes at 1080p and the Instagram upload a few more).
+The tasks run as the logged-in user with the venv Python, logging to `output/logs/<task>.log`. `install-tasks` ends by setting four laptop-safe properties on every task that `schtasks` leaves wrong by default: run as soon as possible after a missed start, wake the computer to run, allow starting on battery, and do not stop when switching to battery (plus a 3-hour execution limit). Without them a laptop that sleeps through 13:00 silently skips the whole afternoon reel, which is what happened on 2026-11-12. `harden-tasks` re-applies them on their own. Wake-to-run only works from sleep, not from a shut-down machine, so the laptop must at least be asleep, not off, at the slot times (the render needs about 15 minutes at 1080p and the Instagram upload a few more).
 
 ## Safety
 

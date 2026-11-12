@@ -229,6 +229,23 @@ def task_cmd(args: str, name: str) -> str:
     return f'"{launcher}" ' + " ".join(parts)
 
 
+HARDEN_PS = ("$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+             "-ExecutionTimeLimit (New-TimeSpan -Hours 3) -MultipleInstances IgnoreNew; "
+             "Get-ScheduledTask -TaskPath '\\REELFORGE\\' | ForEach-Object { Set-ScheduledTask -TaskPath '\\REELFORGE\\' -TaskName $_.TaskName -Settings $s | Out-Null }; "
+             "Get-ScheduledTask -TaskPath '\\REELFORGE\\' | ForEach-Object { $t = $_.Settings; "
+             "'{0,-18} missed={1} wake={2} onBattery={3} stopOnBattery={4} limit={5}' -f $_.TaskName, $t.StartWhenAvailable, $t.WakeToRun, (-not $t.DisallowStartIfOnBatteries), $t.StopIfGoingOnBatteries, $t.ExecutionTimeLimit }")
+
+
+def harden_tasks() -> None:
+    """schtasks creates tasks that skip a missed start, never wake the machine, start only on AC
+    power and stop on battery: on a laptop that silently skips whole days (2026-11-12: asleep
+    04:25-15:25 IST, no afternoon reel). Set the laptop-safe settings on every REELFORGE task."""
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", HARDEN_PS], capture_output=True, text=True)
+    print((r.stdout or r.stderr).strip())
+    if r.returncode != 0:
+        log.warning("task hardening failed: %s", (r.stderr or r.stdout)[-300:])
+
+
 def install_tasks() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
     jobs = []
@@ -252,6 +269,7 @@ def install_tasks() -> None:
     tn = f"{TASK_PREFIX}\\niche-watch"
     r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "WEEKLY", "/D", "MON", "/ST", NICHE_AT, "/TN", tn, "/TR", task_cmd("niche", "niche-watch")], capture_output=True, text=True)
     print(tn, "Mondays", NICHE_AT, "->", (r.stdout or r.stderr).strip())
+    harden_tasks()
 
 
 def remove_tasks() -> None:
@@ -263,7 +281,7 @@ def remove_tasks() -> None:
 # ---------------------------------------------------------------- cli
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["produce", "publish", "dm", "analytics", "niche", "status", "install-tasks", "remove-tasks"])
+    ap.add_argument("command", choices=["produce", "publish", "dm", "analytics", "niche", "status", "install-tasks", "harden-tasks", "remove-tasks"])
     ap.add_argument("--slot", default="afternoon")
     ap.add_argument("--date", default=None)
     ap.add_argument("--topic", default=None)
@@ -305,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  @{v.get('username')} attempts={v.get('attempts')} last={v.get('last_error')}")
     elif args.command == "install-tasks":
         install_tasks()
+    elif args.command == "harden-tasks":
+        harden_tasks()
     elif args.command == "remove-tasks":
         remove_tasks()
     return 0
