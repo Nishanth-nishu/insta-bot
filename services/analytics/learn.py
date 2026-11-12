@@ -79,7 +79,7 @@ def reel_attributes(reel_id: str, storyboards: Path | None = None, topics: Path 
     """Hook text, hook formula, scene kinds, narration words, category: read from the storyboard and the topic file."""
     sb_dir = storyboards or paths.STORYBOARDS
     tp_dir = topics or paths.TOPICS
-    attrs = {"hook": None, "hook_formula": "unknown", "hook_pattern": "none", "hook_score": None, "scene_kinds": [], "words": None, "category": None, "duration_s": None}
+    attrs = {"hook": None, "hook_formula": "unknown", "hook_pattern": "none", "hook_score": None, "retention_estimate": None, "scene_kinds": [], "words": None, "category": None, "duration_s": None}
     for name in (f"{reel_id}.timed.json", f"{reel_id}.json"):
         f = sb_dir / name
         if f.exists():
@@ -101,6 +101,14 @@ def reel_attributes(reel_id: str, storyboards: Path | None = None, topics: Path 
             attrs["words"] = sum(len((s.get("narration") or "").split()) for s in scenes)
             if sb.get("durationMs"):
                 attrs["duration_s"] = round(sb["durationMs"] / 1000, 1)
+            try:  # Reelsmith's pre-flight estimate, kept so real watch time can judge it
+                from services.story import retention
+
+                if retention.available():
+                    est = retention.estimate(sb, attrs["duration_s"])
+                    attrs["retention_estimate"] = est["score"] if est else None
+            except Exception:
+                pass
             break
     for f in tp_dir.glob("*.json"):
         try:
@@ -145,6 +153,8 @@ def performance_rows(state: dict, attrs_fn=reel_attributes, now: float | None = 
             "category": a.get("category"), "hook": a.get("hook"), "hook_formula": a.get("hook_formula"),
             "hook_pattern": a.get("hook_pattern") or "none", "hook_score": a.get("hook_score"),
             "hook_score_bucket": ("under 40" if (a.get("hook_score") or 0) < 40 else "40-55" if (a.get("hook_score") or 0) < 55 else "55+") if a.get("hook_score") is not None else "unknown",
+            "retention_estimate": a.get("retention_estimate"),
+            "retention_est_bucket": ("under 70" if a["retention_estimate"] < 70 else "70-85" if a["retention_estimate"] < 85 else "85+") if a.get("retention_estimate") is not None else "unknown",
             "length_bucket": length_bucket(duration), "words": a.get("words"), "scene_kinds": a.get("scene_kinds"),
         })
     return rows
@@ -215,8 +225,8 @@ def build_brief(rows: list[dict], now: float | None = None) -> tuple[str, dict]:
         if rows[-1] is not rows[0]:
             w = rows[-1]
             lines += ["## Weakest reel", "", f"- {w.get('title') or w.get('reel_id')}: {w['views']} views, retention {_pct(w.get('retention'))}, index {w['index']}. Hook: \"{(w.get('hook') or '')[:110]}\"", ""]
-        by_pattern, by_hs = aggregate(rows, "hook_pattern"), aggregate(rows, "hook_score_bucket")
-        for title, groups in (("By topic category", by_cat), ("By hook formula", by_hook), ("By hook pattern (instagram-agent-skill formulas)", by_pattern), ("By hook score (hookscore.py)", by_hs), ("By length", by_len), ("By slot", by_slot)):
+        by_pattern, by_hs, by_re = aggregate(rows, "hook_pattern"), aggregate(rows, "hook_score_bucket"), aggregate(rows, "retention_est_bucket")
+        for title, groups in (("By topic category", by_cat), ("By hook formula", by_hook), ("By hook pattern (instagram-agent-skill formulas)", by_pattern), ("By hook score (hookscore.py)", by_hs), ("By Reelsmith retention estimate (pre-flight, rules only)", by_re), ("By length", by_len), ("By slot", by_slot)):
             lines += [f"## {title}", "", "| group | reels | index | retention | avg views |", "|---|---|---|---|---|"]
             lines += [f"| {g} | {v['n']} | {v['index']} | {_pct(v['retention'])} | {v['views']} |" for g, v in groups.items()]
             lines.append("")

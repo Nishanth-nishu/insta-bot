@@ -121,6 +121,16 @@ def hook_report(sb: Storyboard) -> dict:
         return {"hook_score": None, "hook_error": str(exc)}
 
 
+def retention_report(sb: Storyboard) -> dict:
+    """Reelsmith's rules-only retention estimate for the CLI output (advice, not a gate)."""
+    try:
+        from services.story import retention
+
+        return retention.report(sb)
+    except Exception as exc:
+        return {"retention_score": None, "retention_error": str(exc)}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
@@ -130,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     for arg in args:
         sb = Storyboard.model_validate_json(Path(arg).read_text(encoding="utf-8"))
         problems = check_storyboard(sb)
-        print(json.dumps({"storyboard": arg, "ok": not problems, "problems": problems, **hook_report(sb)}, indent=1, ensure_ascii=False))
+        print(json.dumps({"storyboard": arg, "ok": not problems, "problems": problems, **hook_report(sb), **retention_report(sb)}, indent=1, ensure_ascii=False))
         rc = rc or (1 if problems else 0)
     return rc
 

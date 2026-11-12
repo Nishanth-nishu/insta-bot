@@ -24,7 +24,7 @@ Everything is relative to this account's own median, so a small account learns f
 - views. Did Instagram push it.
 - index = 0.45 x retention + 0.30 x views + 0.25 x engagement, each as value / median, capped at 3.
 
-A reel counts once it is 20 hours old (a "settled" snapshot), because reels keep collecting views for a day or two. Each reel is tagged with what we chose for it: topic category (from the topic file), hook text and hook family (question, if-you, number, warning, callout, statement; classified from the first scene), scene kinds, narration words, length bucket and slot. The brief groups the index by each of those.
+A reel counts once it is 20 hours old (a "settled" snapshot), because reels keep collecting views for a day or two. Each reel is tagged with what we chose for it: topic category (from the topic file), hook text and hook family (question, if-you, number, warning, callout, statement; classified from the first scene), hook score, Reelsmith's pre-flight retention estimate (rules only; see AUTOMATION.md), scene kinds, narration words, length bucket and slot. The brief groups the index by each of those, so the two predicted scores (hook score, retention estimate) can be checked against the measured retention before anyone trusts them.
 
 ## What changes, and what never does
 

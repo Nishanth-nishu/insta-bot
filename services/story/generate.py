@@ -25,7 +25,7 @@ from services.common.schema import Storyboard
 from services.common.env import load_dotenv
 from services.llm.client import LLM, claude_executable
 from services.analytics.learn import learning_notes
-from services.story import polish
+from services.story import polish, retention
 from services.publishing.seo import build_caption, kicker_date, lint_caption, pick_hashtags
 from services.research.score import slugify
 
@@ -216,6 +216,11 @@ def validate(sb: Storyboard, answer: dict, post_date: date, lite: bool = False, 
         advice = polish.hook_advice(sb.scenes[0].narration)
         if advice:
             problems.append(advice)
+        # Reelsmith's rules-only retention estimate: a pre-flight on the whole spoken script,
+        # fed back with its fixes on every attempt but the last; silent when Reelsmith is absent.
+        ret = retention.advice(retention.estimate(sb))
+        if ret:
+            problems.append(ret)
     if sb.scenes and len(words(sb.scenes[0].narration)) > 16:
         problems.append("hook over 16 words")
     if sb.scenes and sb.scenes[-1].kind != "payoff":
@@ -247,7 +252,7 @@ Do this, in order:
 2. Read the topic brief. Use the brief as the only source of facts. Never invent numbers.
 3. Write the storyboard JSON at the path above with id "{reel_id}": 5 to 7 scenes, English, hook under 16 words and anxious-funny, 100 to 140 narration words, no link or URL anywhere on screen or in the caption, last scene a payoff with cta "Comment LETS GO, the link lands in your DMs" and narration ending "Want the link? Comment LETS GO and I'll send it to your DMs. And follow, so you're not the last to know.", presenter look "vrm", voice am_fenrir, dmLink = the first source URL.
    Caption (SEO): first line = the hook with the search keyword, under 125 chars; two-sentence summary with the keyword once; a line "{caption_date} update."; the line "Want the link? Comment LETS GO and I'll DM it to you."; then exactly 5 hashtags: 3 niche + 2 of #ai #technews #artificialintelligence (Instagram caps a post at 5).
-   Hook quality: the rules checker prints hook_score and hook_advice; aim for a score of 50 or more (a concrete number, name or product in the first sentence, 5 to 12 words, aimed at coders) and fix any dealbreaker. No em dashes, curly quotes or slop words anywhere: the checker reports them as machine artefacts.
+   Hook quality: the rules checker prints hook_score and hook_advice; aim for a score of 50 or more (a concrete number, name or product in the first sentence, 5 to 12 words, aimed at coders) and fix any dealbreaker. The checker also prints retention_score (a rules-only estimate of how much of the reel people will watch) with retention_fixes pinned to seconds; aim for 70 or more and apply the fixes that do not break the house format. No em dashes, curly quotes or slop words anywhere: the checker reports them as machine artefacts.
 4. Run the rules checker:  .venv\\Scripts\\python -m services.common.rules {out_path}   and fix the file until it prints "ok": true.
 5. Print the single line DONE when the file is valid. Do not render, synthesize, commit, publish, or touch any other file.
 """
